@@ -8,5 +8,6 @@ edition = "2018"
 
 [dependencies]
 cocoa = "0.20"
+iced = "0.1"
 iced_native = "0.2"
 objc = "0.2"
