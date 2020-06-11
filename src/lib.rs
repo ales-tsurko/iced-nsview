@@ -1,7 +1,7 @@
 //! This crate allows you to use Iced as NSView. Thus it makes Iced embeddable into macOS
 //! application or AU/VST plugins, for example.
 //!
-//! You should implement your GUI using `program::Program`, then you can init `IcedView` from it.
+//! You should implement your GUI using `Application`, then you can init `IcedView` from it.
 
 #![deny(
     missing_docs,
@@ -29,10 +29,11 @@ use cocoa::quartzcore::CALayer;
 use core_graphics::base::CGFloat;
 use core_graphics::geometry::CGRect;
 
-use iced_wgpu::wgpu;
+use iced_wgpu::{wgpu, Renderer};
 
-pub use iced_native::*;
-pub use iced_wgpu::{Renderer, Viewport};
+pub use iced_wgpu::Viewport;
+
+pub use iced_native::{Element as NativeElement, *};
 
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, YES};
@@ -40,23 +41,27 @@ use objc::{class, msg_send, sel, sel_impl};
 
 pub use objc::runtime::Object;
 
+/// A composition of widgets.
+pub type Element<'a, M> = NativeElement<'a, M, iced_wgpu::Renderer>;
+
 /// Iced view subclassed from NSView.
-pub struct IcedView<P: Program> {
+pub struct IcedView<A: Application> {
     object: *mut Object,
-    program: P,
+    program: Program<A>,
 }
 
-impl<P: Program> IcedView<P> {
+impl<A: Application> IcedView<A> {
     /// Constructor.
-    pub fn new(program: P, viewport: Viewport) -> Self {
-        let object = unsafe { IcedView::<P>::init_nsview(viewport.physical_size()) };
-        let surface = unsafe { IcedView::<P>::init_surface_layer(object, viewport.scale_factor()) };
+    pub fn new(application: A, viewport: Viewport) -> Self {
+        let object = unsafe { IcedView::<A>::init_nsview(viewport.physical_size()) };
+        let surface = unsafe { IcedView::<A>::init_surface_layer(object, viewport.scale_factor()) };
+        let program = Program::new(application);
 
         Self { object, program }
     }
 
     unsafe fn init_nsview(size: Size<u32>) -> *mut Object {
-        let class = IcedView::<P>::declare_class();
+        let class = IcedView::<A>::declare_class();
         let rect = NSRect::new(
             NSPoint::new(0.0, 0.0),
             NSSize::new(size.width.into(), size.height.into()),
@@ -95,6 +100,43 @@ impl<P: Program> IcedView<P> {
     /// Make this view a subview of another view.
     pub unsafe fn make_subview_of(&self, view: *mut c_void) {
         NSView::addSubview_(view as id, self.object);
+    }
+}
+
+/// Implement this trait for your application then pass it into `IcedView::new`.
+pub trait Application {
+    /// The message your application will produce.
+    type Message: Clone + std::fmt::Debug + Send;
+
+    /// Message processing function.
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message>;
+
+    /// Application interface.
+    fn view(&mut self) -> Element<'_, Self::Message>;
+}
+
+struct Program<A: Application> {
+    application: A,
+}
+
+impl<A: Application> Program<A> {
+    fn new(application: A) -> Self {
+        Self { application }
+    }
+}
+
+impl<A: Application> program::Program for Program<A> {
+    type Renderer = Renderer;
+    type Message = A::Message;
+
+
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+        self.application.update(message)
+    }
+
+    /// Application interface.
+    fn view(&mut self) -> NativeElement<'_, Self::Message, Self::Renderer> {
+        self.application.view()
     }
 }
 

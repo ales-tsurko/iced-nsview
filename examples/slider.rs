@@ -1,8 +1,7 @@
 use iced_nsview::{
-    slider, Align, Color, Column, Command, Element, IcedView, Length, Program, Row, Size, Slider,
-    Text, Viewport,
+    slider, Align, Color, Column, Command, Element, IcedView, Length, Row, Size, Slider,
+    Text, Viewport, Application,
 };
-use iced_wgpu::Renderer;
 
 fn main() {
     let controls = Controls::new();
@@ -29,8 +28,7 @@ impl Controls {
     }
 }
 
-impl Program for Controls {
-    type Renderer = Renderer;
+impl Application for Controls {
     type Message = Message;
 
     fn update(&mut self, message: Message) -> Command<Message> {
@@ -40,7 +38,7 @@ impl Program for Controls {
         Command::none()
     }
 
-    fn view(&mut self) -> Element<Message, Renderer> {
+    fn view(&mut self) -> Element<Message> {
         let slider = Row::new()
             .width(Length::Units(500))
             .spacing(20)
