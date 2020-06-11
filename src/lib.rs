@@ -21,9 +21,12 @@
 
 use std::ffi::c_void;
 
+use cocoa::appkit::NSView;
+use cocoa::base::id;
 use cocoa::foundation::{NSPoint, NSRect, NSSize};
 use cocoa::quartzcore::CALayer;
 
+use core_graphics::base::CGFloat;
 use core_graphics::geometry::CGRect;
 
 use iced_wgpu::wgpu;
@@ -47,7 +50,7 @@ impl<P: Program> IcedView<P> {
     /// Constructor.
     pub fn new(program: P, viewport: Viewport) -> Self {
         let object = unsafe { IcedView::<P>::init_nsview(viewport.physical_size()) };
-        let surface = unsafe { IcedView::<P>::init_surface(object) };
+        let surface = unsafe { IcedView::<P>::init_surface_layer(object, viewport.scale_factor()) };
 
         Self { object, program }
     }
@@ -58,13 +61,8 @@ impl<P: Program> IcedView<P> {
             NSPoint::new(0.0, 0.0),
             NSSize::new(size.width.into(), size.height.into()),
         );
-        let layer = CALayer::new();
-        layer.set_frame(rect.as_CGRect());
-
         let allocation: *const Object = msg_send![class, alloc];
         let object: *mut Object = msg_send![allocation, initWithFrame: rect];
-        let _: () = msg_send![object, setLayer: layer];
-        let _: () = msg_send![object, setWantsLayer: YES];
 
         object
     }
@@ -76,13 +74,14 @@ impl<P: Program> IcedView<P> {
         decl.register()
     }
 
-    unsafe fn init_surface(view: *mut Object) -> wgpu::Surface {
+    unsafe fn init_surface_layer(view: *mut Object, scale: f64) -> wgpu::Surface {
         let class = class!(CAMetalLayer);
         let layer: *mut Object = msg_send![class, new];
         let () = msg_send![view, setLayer: layer];
         let () = msg_send![view, setWantsLayer: YES];
         let bounds: CGRect = msg_send![view, bounds];
         let () = msg_send![layer, setBounds: bounds];
+        let () = msg_send![layer, setContentsScale: scale];
         let _: *mut c_void = msg_send![view, retain];
 
         wgpu::Surface::create_surface_from_core_animation_layer(layer as *mut c_void)
@@ -94,7 +93,20 @@ impl<P: Program> IcedView<P> {
     }
 
     /// Make this view a subview of another view.
-    pub fn make_subview_of(&self, view: *mut c_void) {
-        todo!()
+    pub unsafe fn make_subview_of(&self, view: *mut c_void) {
+        NSView::addSubview_(view as id, self.object);
+    }
+}
+
+/// This function returns scale factor of the passed view.
+///
+/// It returns `None` if the view has no window.
+pub unsafe fn get_nsview_scale_factor(view: *mut c_void) -> Option<f64> {
+    let window: id = msg_send![view as *mut Object, window];
+    if window.is_null() {
+        None
+    } else {
+        let scale_factor: CGFloat = msg_send![window, backingScaleFactor];
+        Some(scale_factor)
     }
 }
