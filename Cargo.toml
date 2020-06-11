@@ -12,3 +12,6 @@ core-graphics = "0.19"
 iced_native = { git = "https://github.com/hecrj/iced.git" }
 iced_wgpu = { git = "https://github.com/hecrj/iced.git" }
 objc = "0.2"
+
+[dev-dependencies]
+winit = "0.22"
