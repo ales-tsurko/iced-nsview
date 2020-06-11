@@ -4,6 +4,7 @@
 //! You should implement your GUI using `program::Program`, then you can init `IcedView` from it.
 
 #![deny(
+    missing_docs,
     nonstandard_style,
     rust_2018_idioms,
     trivial_casts,
@@ -11,7 +12,6 @@
 )]
 #![warn(
     deprecated_in_future,
-    missing_docs,
     unused_import_braces,
     unused_labels,
     unused_lifetimes,
@@ -21,30 +21,76 @@
 
 use std::ffi::c_void;
 
-use objc::class;
-use objc::declare::ClassDecl;
+use cocoa::foundation::{NSPoint, NSRect, NSSize};
+use cocoa::quartzcore::CALayer;
+
+use core_graphics::geometry::CGRect;
+
+use iced_wgpu::wgpu;
 
 pub use iced_native::*;
+pub use iced_wgpu::{Renderer, Viewport};
+
+use objc::declare::ClassDecl;
+use objc::runtime::{Class, YES};
+use objc::{class, msg_send, sel, sel_impl};
+
+pub use objc::runtime::Object;
 
 /// Iced view subclassed from NSView.
-pub struct IcedView<P: program::Program> {
-    // raw_ptr: *mut c_void,
-    decl: ClassDecl,
+pub struct IcedView<P: Program> {
+    object: *mut Object,
     program: P,
 }
 
-impl<P: program::Program> IcedView<P> {
+impl<P: Program> IcedView<P> {
     /// Constructor.
-    pub fn new(program: P) -> Self {
-        let superclass = class!(NSView);
-        let decl = ClassDecl::new("IcedView", superclass).expect("Can't allocate IcedView");
+    pub fn new(program: P, viewport: Viewport) -> Self {
+        let object = unsafe { IcedView::<P>::init_nsview(viewport.physical_size()) };
+        let surface = unsafe { IcedView::<P>::init_surface(object) };
 
-        Self { decl, program }
+        Self { object, program }
+    }
+
+    unsafe fn init_nsview(size: Size<u32>) -> *mut Object {
+        let class = IcedView::<P>::declare_class();
+        let rect = NSRect::new(
+            NSPoint::new(0.0, 0.0),
+            NSSize::new(size.width.into(), size.height.into()),
+        );
+        let layer = CALayer::new();
+        layer.set_frame(rect.as_CGRect());
+
+        let allocation: *const Object = msg_send![class, alloc];
+        let object: *mut Object = msg_send![allocation, initWithFrame: rect];
+        let _: () = msg_send![object, setLayer: layer];
+        let _: () = msg_send![object, setWantsLayer: YES];
+
+        object
+    }
+
+    fn declare_class() -> &'static Class {
+        let superclass = class!(NSView);
+        let decl = ClassDecl::new("IcedView", superclass).expect("Can't declare IcedView");
+        // TODO methods declaration goes here
+        decl.register()
+    }
+
+    unsafe fn init_surface(view: *mut Object) -> wgpu::Surface {
+        let class = class!(CAMetalLayer);
+        let layer: *mut Object = msg_send![class, new];
+        let () = msg_send![view, setLayer: layer];
+        let () = msg_send![view, setWantsLayer: YES];
+        let bounds: CGRect = msg_send![view, bounds];
+        let () = msg_send![layer, setBounds: bounds];
+        let _: *mut c_void = msg_send![view, retain];
+
+        wgpu::Surface::create_surface_from_core_animation_layer(layer as *mut c_void)
     }
 
     /// Get a raw pointer to the Cocoa view.
-    pub fn raw_ptr(&self) -> *mut c_void {
-        todo!()
+    pub fn raw_object(&self) -> *mut Object {
+        self.object
     }
 
     /// Make this view a subview of another view.
