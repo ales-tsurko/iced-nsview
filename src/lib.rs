@@ -23,7 +23,7 @@
 use std::ffi::c_void;
 
 use cocoa::appkit::{NSEvent, NSView};
-use cocoa::base::{id, nil};
+use cocoa::base::{id, nil, BOOL};
 use cocoa::foundation::{NSPoint, NSRect, NSSize};
 
 use core_graphics::base::CGFloat;
@@ -84,6 +84,7 @@ impl<A: 'static + Application> IcedView<A> {
         let superclass = class!(NSView);
         let mut decl = ClassDecl::new("IcedView", superclass).expect("Can't declare IcedView");
 
+        let accepts_first_responder: extern "C" fn(&Object, Sel) -> BOOL = Self::accepts_first_responder;
         let update_tracking_areas: extern "C" fn(&Object, Sel) = Self::update_tracking_areas;
         let update_layer: extern "C" fn(&Object, Sel) = Self::update_layer;
         let mouse_down: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_down;
@@ -96,6 +97,9 @@ impl<A: 'static + Application> IcedView<A> {
         let right_mouse_dragged: extern "C" fn(&Object, Sel, *mut Object) =
             Self::right_mouse_dragged;
         let right_mouse_up: extern "C" fn(&Object, Sel, *mut Object) = Self::right_mouse_up;
+        let key_down: extern "C" fn(&Object, Sel, *mut Object) = Self::key_down;
+        let key_up: extern "C" fn(&Object, Sel, *mut Object) = Self::key_up;
+        decl.add_method(sel!(acceptsFirstResponder), accepts_first_responder);
         decl.add_method(sel!(updateTrackingAreas), update_tracking_areas);
         decl.add_method(sel!(updateLayer), update_layer);
         decl.add_method(sel!(mouseDown:), mouse_down);
@@ -106,8 +110,14 @@ impl<A: 'static + Application> IcedView<A> {
         decl.add_method(sel!(mouseExited:), mouse_exited);
         decl.add_method(sel!(rightMouseDown:), right_mouse_down);
         decl.add_method(sel!(rightMouseDragged:), right_mouse_dragged);
-        decl.add_method(sel!(rughtMouseUp:), right_mouse_up);
+        decl.add_method(sel!(rightMouseUp:), right_mouse_up);
+        decl.add_method(sel!(keyDown:), key_down);
+        decl.add_method(sel!(keyUp:), key_up);
         decl.register()
+    }
+
+    extern "C" fn accepts_first_responder(_this: &Object, _cmd: Sel) -> BOOL {
+        return YES;
     }
 
     extern "C" fn update_tracking_areas(this: &Object, _cmd: Sel) {
@@ -189,6 +199,20 @@ impl<A: 'static + Application> IcedView<A> {
             let () = msg_send![this, setNeedsDisplay: YES];
         };
         println!("right mouse up");
+    }
+
+    extern "C" fn key_down(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("key down");
+    }
+
+    extern "C" fn key_up(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("key up");
     }
 
     unsafe fn init_surface_layer(view: *mut Object, scale: f64) -> wgpu::Surface {
