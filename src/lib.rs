@@ -1,7 +1,8 @@
-//! This crate allows you to use Iced as NSView. Thus it makes Iced embeddable into macOS
+//! This crate allows you to use Iced as NSView. Thus it makes Iced embeddable into a macOS
 //! application or AU/VST plugins, for example.
 //!
-//! You should implement your GUI using `Application`, then you can init `IcedView` from it.
+//! You should implement your GUI using `Application` trait, then you can initialize `IcedView`
+//! with it.
 
 #![deny(
     missing_docs,
@@ -24,12 +25,11 @@ use std::ffi::c_void;
 use cocoa::appkit::NSView;
 use cocoa::base::id;
 use cocoa::foundation::{NSPoint, NSRect, NSSize};
-use cocoa::quartzcore::CALayer;
 
 use core_graphics::base::CGFloat;
 use core_graphics::geometry::CGRect;
 
-use iced_wgpu::{wgpu, Renderer};
+use iced_wgpu::{wgpu, Backend, Renderer, Settings};
 
 pub use iced_wgpu::Viewport;
 
@@ -42,26 +42,34 @@ use objc::{class, msg_send, sel, sel_impl};
 pub use objc::runtime::Object;
 
 /// A composition of widgets.
-pub type Element<'a, M> = NativeElement<'a, M, iced_wgpu::Renderer>;
+pub type Element<'a, M> = NativeElement<'a, M, Renderer>;
 
-/// Iced view subclassed from NSView.
-pub struct IcedView<A: Application> {
+/// Iced view which is a subclass of NSView.
+pub struct IcedView<A: 'static + Application> {
     object: *mut Object,
-    program: Program<A>,
+    state: program::State<Program<A>>,
 }
 
-impl<A: Application> IcedView<A> {
+impl<A: 'static + Application> IcedView<A> {
     /// Constructor.
     pub fn new(application: A, viewport: Viewport) -> Self {
-        let object = unsafe { IcedView::<A>::init_nsview(viewport.physical_size()) };
-        let surface = unsafe { IcedView::<A>::init_surface_layer(object, viewport.scale_factor()) };
+        let object = unsafe { Self::init_nsview(viewport.physical_size()) };
+        let surface = unsafe { Self::init_surface_layer(object, viewport.scale_factor()) };
+        let (mut device, queue) = Self::init_device_and_queue(&surface);
+        let format = wgpu::TextureFormat::Bgra8UnormSrgb;
+        let swap_chain =
+            Self::init_swap_chain(&viewport.physical_size(), &device, &surface, &format);
+        let mut debug = Debug::new();
+        let mut renderer = Renderer::new(Backend::new(&mut device, Settings::default()));
         let program = Program::new(application);
+        let state: program::State<Program<A>> =
+            program::State::new(program, viewport.logical_size(), &mut renderer, &mut debug);
 
-        Self { object, program }
+        Self { object, state }
     }
 
     unsafe fn init_nsview(size: Size<u32>) -> *mut Object {
-        let class = IcedView::<A>::declare_class();
+        let class = Self::declare_class();
         let rect = NSRect::new(
             NSPoint::new(0.0, 0.0),
             NSSize::new(size.width.into(), size.height.into()),
@@ -75,9 +83,12 @@ impl<A: Application> IcedView<A> {
     fn declare_class() -> &'static Class {
         let superclass = class!(NSView);
         let decl = ClassDecl::new("IcedView", superclass).expect("Can't declare IcedView");
-        // TODO methods declaration goes here
+        let draw_rect: extern "C" fn(&Object, *mut Object) = Self::draw_rect;
+        // decl.add_method(sel!(drawRect), draw_rect);
         decl.register()
     }
+
+    extern "C" fn draw_rect(_this: &Object, dirty_rect: *mut Object) {}
 
     unsafe fn init_surface_layer(view: *mut Object, scale: f64) -> wgpu::Surface {
         let class = class!(CAMetalLayer);
@@ -90,6 +101,47 @@ impl<A: Application> IcedView<A> {
         let _: *mut c_void = msg_send![view, retain];
 
         wgpu::Surface::create_surface_from_core_animation_layer(layer as *mut c_void)
+    }
+
+    fn init_device_and_queue(surface: &wgpu::Surface) -> (wgpu::Device, wgpu::Queue) {
+        futures::executor::block_on(async {
+            let adapter = wgpu::Adapter::request(
+                &wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::Default,
+                    compatible_surface: Some(&surface),
+                },
+                wgpu::BackendBit::PRIMARY,
+            )
+            .await
+            .expect("Request adapter");
+
+            adapter
+                .request_device(&wgpu::DeviceDescriptor {
+                    extensions: wgpu::Extensions {
+                        anisotropic_filtering: false,
+                    },
+                    limits: wgpu::Limits::default(),
+                })
+                .await
+        })
+    }
+
+    fn init_swap_chain(
+        size: &Size<u32>,
+        device: &wgpu::Device,
+        surface: &wgpu::Surface,
+        format: &wgpu::TextureFormat,
+    ) -> wgpu::SwapChain {
+        device.create_swap_chain(
+            &surface,
+            &wgpu::SwapChainDescriptor {
+                usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+                format: format.clone(),
+                width: size.width,
+                height: size.height,
+                present_mode: wgpu::PresentMode::Mailbox,
+            },
+        )
     }
 
     /// Get a raw pointer to the Cocoa view.
@@ -128,7 +180,6 @@ impl<A: Application> Program<A> {
 impl<A: Application> program::Program for Program<A> {
     type Renderer = Renderer;
     type Message = A::Message;
-
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         self.application.update(message)
