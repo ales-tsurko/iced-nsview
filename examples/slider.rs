@@ -1,9 +1,11 @@
 use cocoa::appkit::{
-    NSApp, NSApplication, NSApplicationActivationPolicyRegular, NSBackingStoreBuffered, NSWindow,
-    NSWindowStyleMask,
+    NSApp, NSApplication, NSApplicationActivationPolicyRegular, NSBackingStoreBuffered, NSView,
+    NSWindow, NSWindowStyleMask,
 };
-use cocoa::base::{id, nil, NO};
+use cocoa::base::{id, nil, NO, YES};
 use cocoa::foundation::{NSAutoreleasePool, NSPoint, NSRect, NSSize};
+
+use objc::{msg_send, sel, sel_impl};
 
 use iced_nsview::{
     slider, Align, Application, Color, Column, Command, Element, IcedView, Length, Row, Size,

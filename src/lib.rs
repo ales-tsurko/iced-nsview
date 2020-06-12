@@ -22,8 +22,8 @@
 
 use std::ffi::c_void;
 
-use cocoa::appkit::NSView;
-use cocoa::base::id;
+use cocoa::appkit::{NSEvent, NSView};
+use cocoa::base::{id, nil};
 use cocoa::foundation::{NSPoint, NSRect, NSSize};
 
 use core_graphics::base::CGFloat;
@@ -36,7 +36,7 @@ pub use iced_wgpu::Viewport;
 pub use iced_native::{Element as NativeElement, *};
 
 use objc::declare::ClassDecl;
-use objc::runtime::{Class, YES};
+use objc::runtime::{Class, Sel, YES};
 use objc::{class, msg_send, sel, sel_impl};
 
 pub use objc::runtime::Object;
@@ -80,21 +80,123 @@ impl<A: 'static + Application> IcedView<A> {
         object
     }
 
-    fn declare_class() -> &'static Class {
+    unsafe fn declare_class() -> &'static Class {
         let superclass = class!(NSView);
-        let decl = ClassDecl::new("IcedView", superclass).expect("Can't declare IcedView");
-        let draw_rect: extern "C" fn(&Object, *mut Object) = Self::draw_rect;
-        // decl.add_method(sel!(drawRect), draw_rect);
+        let mut decl = ClassDecl::new("IcedView", superclass).expect("Can't declare IcedView");
+
+        let update_tracking_areas: extern "C" fn(&Object, Sel) = Self::update_tracking_areas;
+        let update_layer: extern "C" fn(&Object, Sel) = Self::update_layer;
+        let mouse_down: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_down;
+        let mouse_up: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_up;
+        let mouse_dragged: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_dragged;
+        let mouse_moved: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_moved;
+        let mouse_entered: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_entered;
+        let mouse_exited: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_exited;
+        let right_mouse_down: extern "C" fn(&Object, Sel, *mut Object) = Self::right_mouse_down;
+        let right_mouse_dragged: extern "C" fn(&Object, Sel, *mut Object) =
+            Self::right_mouse_dragged;
+        let right_mouse_up: extern "C" fn(&Object, Sel, *mut Object) = Self::right_mouse_up;
+        decl.add_method(sel!(updateTrackingAreas), update_tracking_areas);
+        decl.add_method(sel!(updateLayer), update_layer);
+        decl.add_method(sel!(mouseDown:), mouse_down);
+        decl.add_method(sel!(mouseUp:), mouse_up);
+        decl.add_method(sel!(mouseDragged:), mouse_dragged);
+        decl.add_method(sel!(mouseMoved:), mouse_moved);
+        decl.add_method(sel!(mouseEntered:), mouse_entered);
+        decl.add_method(sel!(mouseExited:), mouse_exited);
+        decl.add_method(sel!(rightMouseDown:), right_mouse_down);
+        decl.add_method(sel!(rightMouseDragged:), right_mouse_dragged);
+        decl.add_method(sel!(rughtMouseUp:), right_mouse_up);
         decl.register()
     }
 
-    extern "C" fn draw_rect(_this: &Object, dirty_rect: *mut Object) {}
+    extern "C" fn update_tracking_areas(this: &Object, _cmd: Sel) {
+        // NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved | NSTrackingCursorUpdate |
+        // NSTrackingActiveInKeyWindow
+        let options = 0x01 | 0x02 | 0x04 | 0x20;
+        let class = class!(NSTrackingArea);
+        unsafe {
+            let bounds: NSRect = msg_send![this, bounds];
+            let alloc: *mut Object = msg_send![class, alloc];
+            let tracking_area: *mut Object = msg_send![alloc, 
+                    initWithRect:bounds options:options owner:this userInfo:nil];
+            let () = msg_send![this, addTrackingArea: tracking_area];
+        }
+    }
+
+    extern "C" fn update_layer(_this: &Object, _cmd: Sel) {
+        println!("called");
+    }
+
+    extern "C" fn mouse_down(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("mouse down");
+    }
+
+    extern "C" fn mouse_up(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("mouse up");
+    }
+
+    extern "C" fn mouse_dragged(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("mouse dragged");
+    }
+
+    extern "C" fn mouse_moved(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("mouse moved");
+    }
+
+    extern "C" fn mouse_entered(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("mouse entered");
+    }
+
+    extern "C" fn mouse_exited(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("mouse exited");
+    }
+
+    extern "C" fn right_mouse_down(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("right mouse down");
+    }
+
+    extern "C" fn right_mouse_dragged(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("right mouse dragged");
+    }
+
+    extern "C" fn right_mouse_up(this: &Object, _cmd: Sel, event: *mut Object) {
+        unsafe {
+            let () = msg_send![this, setNeedsDisplay: YES];
+        };
+        println!("right mouse up");
+    }
 
     unsafe fn init_surface_layer(view: *mut Object, scale: f64) -> wgpu::Surface {
         let class = class!(CAMetalLayer);
         let layer: *mut Object = msg_send![class, new];
-        let () = msg_send![view, setLayer: layer];
         let () = msg_send![view, setWantsLayer: YES];
+        let parent: *mut Object = msg_send![view, layer];
+        let () = msg_send![parent, addSublayer: layer];
         let bounds: CGRect = msg_send![view, bounds];
         let () = msg_send![layer, setBounds: bounds];
         let () = msg_send![layer, setContentsScale: scale];
