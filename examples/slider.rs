@@ -102,9 +102,9 @@ impl Application for Controls {
                     .align_items(Align::Center)
                     .padding(10)
                     .spacing(10)
-                    .push(Text::new("Amp").color(Color::WHITE))
+                    .push(Text::new("Amp"))
                     .push(slider)
-                    .push(Text::new(format!("{:.2}", self.amp)).color(Color::WHITE)),
+                    .push(Text::new(format!("{:.2}", self.amp))),
             )
             .into()
     }

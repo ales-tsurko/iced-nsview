@@ -23,12 +23,12 @@
 use std::ffi::c_void;
 use std::marker::PhantomData;
 
-use cocoa::appkit::{NSEvent, NSView};
+use cocoa::appkit::NSView;
 use cocoa::base::{id, nil, BOOL};
 use cocoa::foundation::{NSPoint, NSRect, NSSize};
 
 use core_graphics::base::CGFloat;
-use core_graphics::geometry::CGRect;
+use core_graphics::geometry::{CGPoint, CGRect};
 
 use iced_wgpu::{wgpu, Backend, Renderer, Settings};
 
@@ -93,7 +93,7 @@ impl<A: 'static + Application> IcedView<A> {
         decl.add_method(sel!(acceptsFirstResponder), accepts_first_responder);
         let update_tracking_areas: extern "C" fn(&Object, Sel) = Self::update_tracking_areas;
         decl.add_method(sel!(updateTrackingAreas), update_tracking_areas);
-        let update_layer: extern "C" fn(&Object, Sel) = Self::update_layer;
+        let update_layer: extern "C" fn(&mut Object, Sel) = Self::update_layer;
         decl.add_method(sel!(updateLayer), update_layer);
         let mouse_down: extern "C" fn(&mut Object, Sel, *mut Object) = Self::mouse_down;
         decl.add_method(sel!(mouseDown:), mouse_down);
@@ -140,16 +140,17 @@ impl<A: 'static + Application> IcedView<A> {
         }
     }
 
-    extern "C" fn update_layer(_this: &Object, _cmd: Sel) {
-        println!("called");
+    extern "C" fn update_layer(this: &mut Object, _cmd: Sel) {
+        unsafe {
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            (*event_handler).redraw();
+        }
     }
 
     extern "C" fn mouse_down(this: &mut Object, _cmd: Sel, event: *mut Object) {
         unsafe {
             let () = msg_send![this, setNeedsDisplay: YES];
-            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
-            let event_handler = *value as *mut EventHandler<A>;
-            println!("{}", (*event_handler).to_test);
         };
         println!("mouse down");
     }
@@ -257,7 +258,14 @@ impl<A: 'static + Application> Drop for IcedView<A> {
 struct EventHandler<A: 'static + Application> {
     object: *mut Object,
     state: program::State<Program<A>>,
-    to_test: String,
+    viewport: Viewport,
+    surface: wgpu::Surface,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    format: wgpu::TextureFormat,
+    swap_chain: wgpu::SwapChain,
+    debug: Debug,
+    renderer: Renderer,
 }
 
 impl<A: 'static + Application> EventHandler<A> {
@@ -276,7 +284,14 @@ impl<A: 'static + Application> EventHandler<A> {
         Self {
             object,
             state,
-            to_test: String::from("hello, I'm working"),
+            viewport,
+            surface,
+            device,
+            queue,
+            format,
+            swap_chain,
+            debug,
+            renderer,
         }
     }
 
@@ -289,6 +304,7 @@ impl<A: 'static + Application> EventHandler<A> {
         let bounds: CGRect = msg_send![view, bounds];
         let () = msg_send![layer, setBounds: bounds];
         let () = msg_send![layer, setContentsScale: scale];
+        let () = msg_send![layer, setAnchorPoint: CGPoint::new(0.0, 0.0)];
         let _: *mut c_void = msg_send![view, retain];
 
         wgpu::Surface::create_surface_from_core_animation_layer(layer as *mut c_void)
@@ -333,6 +349,50 @@ impl<A: 'static + Application> EventHandler<A> {
                 present_mode: wgpu::PresentMode::Mailbox,
             },
         )
+    }
+
+    fn event(&mut self, event: Event) {
+        self.state.queue_event(event);
+    }
+
+    fn redraw(&mut self) {
+        if let Ok(frame) = self.swap_chain.get_next_texture() {
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+            let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                    attachment: &frame.view,
+                    resolve_target: None,
+                    load_op: wgpu::LoadOp::Clear,
+                    store_op: wgpu::StoreOp::Store,
+                    clear_color: wgpu::Color {
+                        r: 1.0,
+                        g: 1.0,
+                        b: 1.0,
+                        a: 1.0,
+                    },
+                }],
+                depth_stencil_attachment: None,
+            });
+
+            let mouse_interaction = self.renderer.backend_mut().draw(
+                &mut self.device,
+                &mut encoder,
+                &frame.view,
+                &self.viewport,
+                self.state.primitive(),
+                &self.debug.overlay(),
+            );
+
+            // Then we submit the work
+            self.queue.submit(&[encoder.finish()]);
+
+            // And update the mouse cursor
+            // self.window
+            // .set_cursor_icon(iced_winit::conversion::mouse_interaction(mouse_interaction));
+        }
     }
 }
 
