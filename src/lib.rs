@@ -380,47 +380,63 @@ impl<A: 'static + Application> EventHandler<A> {
     }
 
     fn redraw(&mut self) {
-        let _ = self.state.update(
-            None,
-            self.viewport.logical_size(),
-            &mut self.renderer,
-            &mut self.debug,
-        );
+        self.update_state();
 
         if let Ok(frame) = self.swap_chain.get_next_texture() {
             let mut encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
-            let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-                    attachment: &frame.view,
-                    resolve_target: None,
-                    load_op: wgpu::LoadOp::Clear,
-                    store_op: wgpu::StoreOp::Store,
-                    clear_color: wgpu::Color {
-                        r: 1.0,
-                        g: 1.0,
-                        b: 1.0,
-                        a: 1.0,
-                    },
-                }],
-                depth_stencil_attachment: None,
-            });
+            self.render_pass(&frame, &mut encoder);
 
-            let mouse_interaction = self.renderer.backend_mut().draw(
-                &mut self.device,
-                &mut encoder,
-                &frame.view,
-                &self.viewport,
-                self.state.primitive(),
-                &self.debug.overlay(),
-            );
+            let mouse_interaction = self.render_iced(&frame, &mut encoder);
 
             self.queue.submit(&[encoder.finish()]);
 
             self.set_cursor_icon(mouse_interaction);
         }
+    }
+
+    fn update_state(&mut self) {
+        self.state.update(
+            None,
+            self.viewport.logical_size(),
+            &mut self.renderer,
+            &mut self.debug,
+        );
+    }
+
+    fn render_pass(&mut self, frame: &wgpu::SwapChainOutput, encoder: &mut wgpu::CommandEncoder) {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
+                attachment: &frame.view,
+                resolve_target: None,
+                load_op: wgpu::LoadOp::Clear,
+                store_op: wgpu::StoreOp::Store,
+                clear_color: wgpu::Color {
+                    r: 1.0,
+                    g: 1.0,
+                    b: 1.0,
+                    a: 1.0,
+                },
+            }],
+            depth_stencil_attachment: None,
+        });
+    }
+
+    fn render_iced(
+        &mut self,
+        frame: &wgpu::SwapChainOutput,
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> mouse::Interaction {
+        self.renderer.backend_mut().draw(
+            &mut self.device,
+            encoder,
+            &frame.view,
+            &self.viewport,
+            self.state.primitive(),
+            &self.debug.overlay(),
+        )
     }
 
     fn set_cursor_icon(&self, cursor: mouse::Interaction) {
