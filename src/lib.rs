@@ -23,7 +23,7 @@
 use std::ffi::c_void;
 use std::marker::PhantomData;
 
-use cocoa::appkit::NSView;
+use cocoa::appkit::{NSEvent, NSView};
 use cocoa::base::{id, nil, BOOL};
 use cocoa::foundation::{NSPoint, NSRect, NSSize};
 
@@ -45,7 +45,7 @@ pub use objc::runtime::Object;
 /// A composition of widgets.
 pub type Element<'a, M> = NativeElement<'a, M, Renderer>;
 
-/// Iced view which is a subclass of NSView.
+/// Iced view which is a subclass of `NSView`.
 pub struct IcedView<A: 'static + Application> {
     object: *mut Object,
     _phantom_app: PhantomData<A>,
@@ -97,23 +97,22 @@ impl<A: 'static + Application> IcedView<A> {
         decl.add_method(sel!(updateLayer), update_layer);
         let mouse_down: extern "C" fn(&mut Object, Sel, *mut Object) = Self::mouse_down;
         decl.add_method(sel!(mouseDown:), mouse_down);
-        let mouse_up: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_up;
+        let mouse_up: extern "C" fn(&mut Object, Sel, *mut Object) = Self::mouse_up;
         decl.add_method(sel!(mouseUp:), mouse_up);
-        let mouse_dragged: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_dragged;
+        let mouse_dragged: extern "C" fn(&mut Object, Sel, *mut Object) = Self::mouse_dragged;
         decl.add_method(sel!(mouseDragged:), mouse_dragged);
-        let mouse_moved: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_moved;
+        let mouse_moved: extern "C" fn(&mut Object, Sel, *mut Object) = Self::mouse_moved;
         decl.add_method(sel!(mouseMoved:), mouse_moved);
-        let mouse_entered: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_entered;
+        let mouse_entered: extern "C" fn(&mut Object, Sel, *mut Object) = Self::mouse_entered;
         decl.add_method(sel!(mouseEntered:), mouse_entered);
-        let mouse_exited: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_exited;
+        let mouse_exited: extern "C" fn(&mut Object, Sel, *mut Object) = Self::mouse_exited;
         decl.add_method(sel!(mouseExited:), mouse_exited);
-        let right_mouse_down: extern "C" fn(&Object, Sel, *mut Object) = Self::right_mouse_down;
+        let right_mouse_down: extern "C" fn(&mut Object, Sel, *mut Object) = Self::right_mouse_down;
         decl.add_method(sel!(rightMouseDown:), right_mouse_down);
-        let right_mouse_dragged: extern "C" fn(&Object, Sel, *mut Object) =
-            Self::right_mouse_dragged;
-        decl.add_method(sel!(rightMouseDragged:), right_mouse_dragged);
-        let right_mouse_up: extern "C" fn(&Object, Sel, *mut Object) = Self::right_mouse_up;
+        let right_mouse_up: extern "C" fn(&mut Object, Sel, *mut Object) = Self::right_mouse_up;
         decl.add_method(sel!(rightMouseUp:), right_mouse_up);
+        let scroll_wheel: extern "C" fn(&mut Object, Sel, *mut Object) = Self::scroll_wheel;
+        decl.add_method(sel!(scrollWheel:), scroll_wheel);
         let key_down: extern "C" fn(&Object, Sel, *mut Object) = Self::key_down;
         decl.add_method(sel!(keyDown:), key_down);
         let key_up: extern "C" fn(&Object, Sel, *mut Object) = Self::key_up;
@@ -148,67 +147,97 @@ impl<A: 'static + Application> IcedView<A> {
         }
     }
 
-    extern "C" fn mouse_down(this: &mut Object, _cmd: Sel, event: *mut Object) {
+    extern "C" fn mouse_down(this: &mut Object, _cmd: Sel, _event: *mut Object) {
         unsafe {
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            (*event_handler).event(Event::Mouse(mouse::Event::ButtonPressed(
+                mouse::Button::Left,
+            )));
             let () = msg_send![this, setNeedsDisplay: YES];
         };
-        println!("mouse down");
     }
 
-    extern "C" fn mouse_up(this: &Object, _cmd: Sel, event: *mut Object) {
+    extern "C" fn mouse_up(this: &mut Object, _cmd: Sel, _event: *mut Object) {
         unsafe {
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            (*event_handler).event(Event::Mouse(mouse::Event::ButtonReleased(
+                mouse::Button::Left,
+            )));
             let () = msg_send![this, setNeedsDisplay: YES];
         };
-        println!("mouse up");
     }
 
-    extern "C" fn mouse_dragged(this: &Object, _cmd: Sel, event: *mut Object) {
-        unsafe {
-            let () = msg_send![this, setNeedsDisplay: YES];
-        };
-        println!("mouse dragged");
+    extern "C" fn mouse_dragged(this: &mut Object, cmd: Sel, event: *mut Object) {
+        Self::mouse_moved(this, cmd, event);
     }
 
-    extern "C" fn mouse_moved(this: &Object, _cmd: Sel, event: *mut Object) {
+    extern "C" fn mouse_moved(this: &mut Object, _cmd: Sel, event: *mut Object) {
         unsafe {
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            let mouse_location: NSPoint = NSEvent::locationInWindow(event);
+            (*event_handler).event(Event::Mouse(mouse::Event::CursorMoved {
+                x: mouse_location.x as f32,
+                y: mouse_location.y as f32,
+            }));
             let () = msg_send![this, setNeedsDisplay: YES];
         };
-        println!("mouse moved");
     }
 
-    extern "C" fn mouse_entered(this: &Object, _cmd: Sel, event: *mut Object) {
+    extern "C" fn mouse_entered(this: &mut Object, _cmd: Sel, _event: *mut Object) {
         unsafe {
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            (*event_handler).event(Event::Mouse(mouse::Event::CursorEntered));
             let () = msg_send![this, setNeedsDisplay: YES];
         };
-        println!("mouse entered");
     }
 
-    extern "C" fn mouse_exited(this: &Object, _cmd: Sel, event: *mut Object) {
+    extern "C" fn mouse_exited(this: &mut Object, _cmd: Sel, _event: *mut Object) {
         unsafe {
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            (*event_handler).event(Event::Mouse(mouse::Event::CursorLeft));
             let () = msg_send![this, setNeedsDisplay: YES];
         };
-        println!("mouse exited");
     }
 
-    extern "C" fn right_mouse_down(this: &Object, _cmd: Sel, event: *mut Object) {
+    extern "C" fn right_mouse_down(this: &mut Object, _cmd: Sel, _event: *mut Object) {
         unsafe {
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            (*event_handler).event(Event::Mouse(mouse::Event::ButtonPressed(
+                mouse::Button::Right,
+            )));
             let () = msg_send![this, setNeedsDisplay: YES];
         };
-        println!("right mouse down");
     }
 
-    extern "C" fn right_mouse_dragged(this: &Object, _cmd: Sel, event: *mut Object) {
+    extern "C" fn right_mouse_up(this: &mut Object, _cmd: Sel, _event: *mut Object) {
         unsafe {
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            (*event_handler).event(Event::Mouse(mouse::Event::ButtonReleased(
+                mouse::Button::Right,
+            )));
             let () = msg_send![this, setNeedsDisplay: YES];
         };
-        println!("right mouse dragged");
     }
 
-    extern "C" fn right_mouse_up(this: &Object, _cmd: Sel, event: *mut Object) {
+    extern "C" fn scroll_wheel(this: &mut Object, _cmd: Sel, event: *mut Object) {
         unsafe {
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            (*event_handler).event(Event::Mouse(mouse::Event::WheelScrolled {
+                delta: mouse::ScrollDelta::Pixels {
+                    x: NSEvent::scrollingDeltaX(event) as f32,
+                    y: NSEvent::scrollingDeltaY(event) as f32,
+                },
+            }));
             let () = msg_send![this, setNeedsDisplay: YES];
-        };
-        println!("right mouse up");
+        }
     }
 
     extern "C" fn key_down(this: &Object, _cmd: Sel, event: *mut Object) {
@@ -356,6 +385,13 @@ impl<A: 'static + Application> EventHandler<A> {
     }
 
     fn redraw(&mut self) {
+        let _ = self.state.update(
+            None,
+            self.viewport.logical_size(),
+            &mut self.renderer,
+            &mut self.debug,
+        );
+
         if let Ok(frame) = self.swap_chain.get_next_texture() {
             let mut encoder = self
                 .device
