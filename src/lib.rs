@@ -21,6 +21,7 @@
 )]
 
 use std::ffi::c_void;
+use std::marker::PhantomData;
 
 use cocoa::appkit::{NSEvent, NSView};
 use cocoa::base::{id, nil, BOOL};
@@ -47,25 +48,27 @@ pub type Element<'a, M> = NativeElement<'a, M, Renderer>;
 /// Iced view which is a subclass of NSView.
 pub struct IcedView<A: 'static + Application> {
     object: *mut Object,
-    state: program::State<Program<A>>,
+    _phantom_app: PhantomData<A>,
 }
 
 impl<A: 'static + Application> IcedView<A> {
+    const EVENT_HANDLER_IVAR: &'static str = "_event_handler";
+
     /// Constructor.
     pub fn new(application: A, viewport: Viewport) -> Self {
         let object = unsafe { Self::init_nsview(viewport.physical_size()) };
-        let surface = unsafe { Self::init_surface_layer(object, viewport.scale_factor()) };
-        let (mut device, queue) = Self::init_device_and_queue(&surface);
-        let format = wgpu::TextureFormat::Bgra8UnormSrgb;
-        let swap_chain =
-            Self::init_swap_chain(&viewport.physical_size(), &device, &surface, &format);
-        let mut debug = Debug::new();
-        let mut renderer = Renderer::new(Backend::new(&mut device, Settings::default()));
-        let program = Program::new(application);
-        let state: program::State<Program<A>> =
-            program::State::new(program, viewport.logical_size(), &mut renderer, &mut debug);
+        let event_handler = EventHandler::new(application, object, viewport);
+        unsafe {
+            (*object).set_ivar(
+                Self::EVENT_HANDLER_IVAR,
+                Box::into_raw(Box::new(event_handler)) as *mut c_void,
+            );
+        };
 
-        Self { object, state }
+        Self {
+            object,
+            _phantom_app: PhantomData,
+        }
     }
 
     unsafe fn init_nsview(size: Size<u32>) -> *mut Object {
@@ -83,36 +86,39 @@ impl<A: 'static + Application> IcedView<A> {
     unsafe fn declare_class() -> &'static Class {
         let superclass = class!(NSView);
         let mut decl = ClassDecl::new("IcedView", superclass).expect("Can't declare IcedView");
+        decl.add_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
 
-        let accepts_first_responder: extern "C" fn(&Object, Sel) -> BOOL = Self::accepts_first_responder;
+        let accepts_first_responder: extern "C" fn(&Object, Sel) -> BOOL =
+            Self::accepts_first_responder;
+        decl.add_method(sel!(acceptsFirstResponder), accepts_first_responder);
         let update_tracking_areas: extern "C" fn(&Object, Sel) = Self::update_tracking_areas;
+        decl.add_method(sel!(updateTrackingAreas), update_tracking_areas);
         let update_layer: extern "C" fn(&Object, Sel) = Self::update_layer;
-        let mouse_down: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_down;
+        decl.add_method(sel!(updateLayer), update_layer);
+        let mouse_down: extern "C" fn(&mut Object, Sel, *mut Object) = Self::mouse_down;
+        decl.add_method(sel!(mouseDown:), mouse_down);
         let mouse_up: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_up;
+        decl.add_method(sel!(mouseUp:), mouse_up);
         let mouse_dragged: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_dragged;
+        decl.add_method(sel!(mouseDragged:), mouse_dragged);
         let mouse_moved: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_moved;
+        decl.add_method(sel!(mouseMoved:), mouse_moved);
         let mouse_entered: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_entered;
+        decl.add_method(sel!(mouseEntered:), mouse_entered);
         let mouse_exited: extern "C" fn(&Object, Sel, *mut Object) = Self::mouse_exited;
+        decl.add_method(sel!(mouseExited:), mouse_exited);
         let right_mouse_down: extern "C" fn(&Object, Sel, *mut Object) = Self::right_mouse_down;
+        decl.add_method(sel!(rightMouseDown:), right_mouse_down);
         let right_mouse_dragged: extern "C" fn(&Object, Sel, *mut Object) =
             Self::right_mouse_dragged;
-        let right_mouse_up: extern "C" fn(&Object, Sel, *mut Object) = Self::right_mouse_up;
-        let key_down: extern "C" fn(&Object, Sel, *mut Object) = Self::key_down;
-        let key_up: extern "C" fn(&Object, Sel, *mut Object) = Self::key_up;
-        decl.add_method(sel!(acceptsFirstResponder), accepts_first_responder);
-        decl.add_method(sel!(updateTrackingAreas), update_tracking_areas);
-        decl.add_method(sel!(updateLayer), update_layer);
-        decl.add_method(sel!(mouseDown:), mouse_down);
-        decl.add_method(sel!(mouseUp:), mouse_up);
-        decl.add_method(sel!(mouseDragged:), mouse_dragged);
-        decl.add_method(sel!(mouseMoved:), mouse_moved);
-        decl.add_method(sel!(mouseEntered:), mouse_entered);
-        decl.add_method(sel!(mouseExited:), mouse_exited);
-        decl.add_method(sel!(rightMouseDown:), right_mouse_down);
         decl.add_method(sel!(rightMouseDragged:), right_mouse_dragged);
+        let right_mouse_up: extern "C" fn(&Object, Sel, *mut Object) = Self::right_mouse_up;
         decl.add_method(sel!(rightMouseUp:), right_mouse_up);
+        let key_down: extern "C" fn(&Object, Sel, *mut Object) = Self::key_down;
         decl.add_method(sel!(keyDown:), key_down);
+        let key_up: extern "C" fn(&Object, Sel, *mut Object) = Self::key_up;
         decl.add_method(sel!(keyUp:), key_up);
+
         decl.register()
     }
 
@@ -128,8 +134,8 @@ impl<A: 'static + Application> IcedView<A> {
         unsafe {
             let bounds: NSRect = msg_send![this, bounds];
             let alloc: *mut Object = msg_send![class, alloc];
-            let tracking_area: *mut Object = msg_send![alloc, 
-                    initWithRect:bounds options:options owner:this userInfo:nil];
+            let tracking_area: *mut Object =
+                msg_send![alloc, initWithRect:bounds options:options owner:this userInfo:nil];
             let () = msg_send![this, addTrackingArea: tracking_area];
         }
     }
@@ -138,9 +144,12 @@ impl<A: 'static + Application> IcedView<A> {
         println!("called");
     }
 
-    extern "C" fn mouse_down(this: &Object, _cmd: Sel, event: *mut Object) {
+    extern "C" fn mouse_down(this: &mut Object, _cmd: Sel, event: *mut Object) {
         unsafe {
             let () = msg_send![this, setNeedsDisplay: YES];
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            println!("{}", (*event_handler).to_test);
         };
         println!("mouse down");
     }
@@ -215,6 +224,62 @@ impl<A: 'static + Application> IcedView<A> {
         println!("key up");
     }
 
+    /// Get a raw pointer to the Cocoa view.
+    pub fn raw_object(&self) -> *mut Object {
+        self.object
+    }
+
+    /// Make this view a subview of another view.
+    pub unsafe fn make_subview_of(&self, view: *mut c_void) {
+        NSView::addSubview_(view as id, self.object);
+    }
+
+    /// Closes the view.
+    pub fn close(&mut self) {
+        todo!();
+    }
+}
+
+impl<A: 'static + Application> Drop for IcedView<A> {
+    fn drop(&mut self) {
+        unsafe {
+            let value = self
+                .object
+                .as_mut()
+                .unwrap()
+                .get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let _ = Box::from_raw(*value as *mut EventHandler<A>);
+            let () = msg_send![self.object, release];
+        }
+    }
+}
+
+struct EventHandler<A: 'static + Application> {
+    object: *mut Object,
+    state: program::State<Program<A>>,
+    to_test: String,
+}
+
+impl<A: 'static + Application> EventHandler<A> {
+    fn new(application: A, object: *mut Object, viewport: Viewport) -> Self {
+        let surface = unsafe { Self::init_surface_layer(object, viewport.scale_factor()) };
+        let (mut device, queue) = Self::init_device_and_queue(&surface);
+        let format = wgpu::TextureFormat::Bgra8UnormSrgb;
+        let swap_chain =
+            Self::init_swap_chain(&viewport.physical_size(), &device, &surface, &format);
+        let mut debug = Debug::new();
+        let mut renderer = Renderer::new(Backend::new(&mut device, Settings::default()));
+        let program = Program::new(application);
+        let state: program::State<Program<A>> =
+            program::State::new(program, viewport.logical_size(), &mut renderer, &mut debug);
+
+        Self {
+            object,
+            state,
+            to_test: String::from("hello, I'm working"),
+        }
+    }
+
     unsafe fn init_surface_layer(view: *mut Object, scale: f64) -> wgpu::Surface {
         let class = class!(CAMetalLayer);
         let layer: *mut Object = msg_send![class, new];
@@ -268,16 +333,6 @@ impl<A: 'static + Application> IcedView<A> {
                 present_mode: wgpu::PresentMode::Mailbox,
             },
         )
-    }
-
-    /// Get a raw pointer to the Cocoa view.
-    pub fn raw_object(&self) -> *mut Object {
-        self.object
-    }
-
-    /// Make this view a subview of another view.
-    pub unsafe fn make_subview_of(&self, view: *mut c_void) {
-        NSView::addSubview_(view as id, self.object);
     }
 }
 
