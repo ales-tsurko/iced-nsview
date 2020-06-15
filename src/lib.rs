@@ -263,11 +263,6 @@ impl<A: 'static + Application> IcedView<A> {
     pub unsafe fn make_subview_of(&self, view: *mut c_void) {
         NSView::addSubview_(view as id, self.object);
     }
-
-    /// Closes the view.
-    pub fn close(&mut self) {
-        todo!();
-    }
 }
 
 impl<A: 'static + Application> Drop for IcedView<A> {
@@ -422,12 +417,28 @@ impl<A: 'static + Application> EventHandler<A> {
                 &self.debug.overlay(),
             );
 
-            // Then we submit the work
             self.queue.submit(&[encoder.finish()]);
 
-            // And update the mouse cursor
-            // self.window
-            // .set_cursor_icon(iced_winit::conversion::mouse_interaction(mouse_interaction));
+            self.set_cursor_icon(mouse_interaction);
+        }
+    }
+
+    fn set_cursor_icon(&self, cursor: mouse::Interaction) {
+        unsafe {
+            let class = class!(NSCursor);
+            let cocoa_cursor: *mut Object = match cursor {
+                mouse::Interaction::Idle => msg_send![class, arrowCursor],
+                mouse::Interaction::Pointer => msg_send![class, pointingHandCursor],
+                mouse::Interaction::Grab => msg_send![class, openHandCursor],
+                mouse::Interaction::Text => msg_send![class, IBeamCursor],
+                mouse::Interaction::Crosshair => msg_send![class, crosshairCursor],
+                mouse::Interaction::Working => msg_send![class, arrowCursor],
+                mouse::Interaction::Grabbing => msg_send![class, closedHandCursor],
+                mouse::Interaction::ResizingHorizontally => msg_send![class, resizeLeftRightCursor],
+                mouse::Interaction::ResizingVertically => msg_send![class, resizeUpDownCursor],
+            };
+
+            let () = msg_send![cocoa_cursor, set];
         }
     }
 }
