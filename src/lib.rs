@@ -402,6 +402,8 @@ impl<T: NSEvent + Copy> From<NSEventT<T>> for Option<Event> {
                 x: mouse_location.x as f32,
                 y: mouse_location.y as f32,
             });
+            let button_num = NSEvent::buttonNumber(event.0);
+
             match NSEvent::eventType(event.0) {
                 NSEventType::NSLeftMouseDown => Some(Event::Mouse(mouse::Event::ButtonPressed(
                     mouse::Button::Left,
@@ -428,10 +430,25 @@ impl<T: NSEvent + Copy> From<NSEventT<T>> for Option<Event> {
                         y: NSEvent::scrollingDeltaY(event.0) as f32,
                     },
                 })),
-                // NSEventType::NSOtherMouseDown => ,
-                // NSEventType::NSOtherMouseUp => ,
+                NSEventType::NSOtherMouseDown => Some(Event::Mouse(mouse::Event::ButtonPressed(
+                    ButtonNumber(button_num).into(),
+                ))),
+                NSEventType::NSOtherMouseUp => Some(Event::Mouse(mouse::Event::ButtonReleased(
+                    ButtonNumber(button_num).into(),
+                ))),
                 _ => None,
             }
+        }
+    }
+}
+
+struct ButtonNumber(i64);
+
+impl From<ButtonNumber> for mouse::Button {
+    fn from(number: ButtonNumber) -> Self {
+        match number.0 {
+            2 => mouse::Button::Middle,
+            value => mouse::Button::Other(value as u8),
         }
     }
 }
