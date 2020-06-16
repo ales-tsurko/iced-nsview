@@ -23,7 +23,7 @@
 use std::ffi::c_void;
 use std::marker::PhantomData;
 
-use cocoa::appkit::{NSEvent, NSEventType, NSView};
+use cocoa::appkit::{NSEvent, NSEventModifierFlags, NSEventType, NSView};
 use cocoa::base::{id, nil, BOOL};
 use cocoa::foundation::{NSPoint, NSRect, NSSize};
 
@@ -421,9 +421,8 @@ impl<T: NSEvent + Copy> From<NSEventT<T>> for Option<Event> {
                 NSEventType::NSLeftMouseDragged => Some(moved),
                 NSEventType::NSMouseEntered => Some(Event::Mouse(mouse::Event::CursorEntered)),
                 NSEventType::NSMouseExited => Some(Event::Mouse(mouse::Event::CursorLeft)),
-                // NSEventType::NSKeyDown => ,
-                // NSEventType::NSKeyUp => ,
-                // NSEventType::NSFlagsChanged => ,
+                NSEventType::NSKeyDown => from_key_down(event.0),
+                NSEventType::NSKeyUp => from_key_up(event.0),
                 NSEventType::NSScrollWheel => Some(Event::Mouse(mouse::Event::WheelScrolled {
                     delta: mouse::ScrollDelta::Pixels {
                         x: NSEvent::scrollingDeltaX(event.0) as f32,
@@ -438,6 +437,169 @@ impl<T: NSEvent + Copy> From<NSEventT<T>> for Option<Event> {
                 ))),
                 _ => None,
             }
+        }
+    }
+}
+
+unsafe fn from_key_down<T: NSEvent + Copy>(event: T) -> Option<Event> {
+    let modifiers = keyboard::ModifiersState::from(ModifierFlags(NSEvent::modifierFlags(event)));
+    let kc = Option::<keyboard::KeyCode>::from(NSKeyCode(NSEvent::keyCode(event)));
+    // let chars = NSEvent::characters(event);
+
+    kc.map(|kc| {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key_code: kc,
+            modifiers,
+        })
+    })
+}
+
+unsafe fn from_key_up<T: NSEvent + Copy>(event: T) -> Option<Event> {
+    let modifiers = keyboard::ModifiersState::from(ModifierFlags(NSEvent::modifierFlags(event)));
+    let kc = Option::<keyboard::KeyCode>::from(NSKeyCode(NSEvent::keyCode(event)));
+    // let chars = NSEvent::characters(event);
+
+    kc.map(|kc| {
+        Event::Keyboard(keyboard::Event::KeyReleased {
+            key_code: kc,
+            modifiers,
+        })
+    })
+}
+
+struct NSKeyCode(u16);
+
+impl From<NSKeyCode> for Option<keyboard::KeyCode> {
+    fn from(key_code: NSKeyCode) -> Self {
+        match key_code.0 {
+            29 => Some(keyboard::KeyCode::Key0),
+            18 => Some(keyboard::KeyCode::Key1),
+            19 => Some(keyboard::KeyCode::Key2),
+            20 => Some(keyboard::KeyCode::Key3),
+            21 => Some(keyboard::KeyCode::Key4),
+            23 => Some(keyboard::KeyCode::Key5),
+            22 => Some(keyboard::KeyCode::Key6),
+            26 => Some(keyboard::KeyCode::Key7),
+            28 => Some(keyboard::KeyCode::Key8),
+            25 => Some(keyboard::KeyCode::Key9),
+            0 => Some(keyboard::KeyCode::A),
+            11 => Some(keyboard::KeyCode::B),
+            8 => Some(keyboard::KeyCode::C),
+            2 => Some(keyboard::KeyCode::D),
+            14 => Some(keyboard::KeyCode::E),
+            3 => Some(keyboard::KeyCode::F),
+            5 => Some(keyboard::KeyCode::G),
+            4 => Some(keyboard::KeyCode::H),
+            34 => Some(keyboard::KeyCode::I),
+            38 => Some(keyboard::KeyCode::J),
+            40 => Some(keyboard::KeyCode::K),
+            37 => Some(keyboard::KeyCode::L),
+            46 => Some(keyboard::KeyCode::M),
+            45 => Some(keyboard::KeyCode::N),
+            31 => Some(keyboard::KeyCode::O),
+            35 => Some(keyboard::KeyCode::P),
+            12 => Some(keyboard::KeyCode::Q),
+            15 => Some(keyboard::KeyCode::R),
+            1 => Some(keyboard::KeyCode::S),
+            17 => Some(keyboard::KeyCode::T),
+            32 => Some(keyboard::KeyCode::U),
+            9 => Some(keyboard::KeyCode::V),
+            13 => Some(keyboard::KeyCode::W),
+            7 => Some(keyboard::KeyCode::X),
+            16 => Some(keyboard::KeyCode::Y),
+            6 => Some(keyboard::KeyCode::Z),
+            // 10 => Some(keyboard::KeyCode::SectionSign    ),
+            50 => Some(keyboard::KeyCode::Grave),
+            27 => Some(keyboard::KeyCode::Minus),
+            24 => Some(keyboard::KeyCode::Equals),
+            33 => Some(keyboard::KeyCode::LBracket),
+            30 => Some(keyboard::KeyCode::RBracket),
+            41 => Some(keyboard::KeyCode::Semicolon),
+            39 => Some(keyboard::KeyCode::Apostrophe),
+            43 => Some(keyboard::KeyCode::Comma),
+            47 => Some(keyboard::KeyCode::Period),
+            44 => Some(keyboard::KeyCode::Slash),
+            42 => Some(keyboard::KeyCode::Backslash),
+            82 => Some(keyboard::KeyCode::Numpad0),
+            83 => Some(keyboard::KeyCode::Numpad1),
+            84 => Some(keyboard::KeyCode::Numpad2),
+            85 => Some(keyboard::KeyCode::Numpad3),
+            86 => Some(keyboard::KeyCode::Numpad4),
+            87 => Some(keyboard::KeyCode::Numpad5),
+            88 => Some(keyboard::KeyCode::Numpad6),
+            89 => Some(keyboard::KeyCode::Numpad7),
+            91 => Some(keyboard::KeyCode::Numpad8),
+            92 => Some(keyboard::KeyCode::Numpad9),
+            65 => Some(keyboard::KeyCode::NumpadComma),
+            67 => Some(keyboard::KeyCode::Multiply),
+            69 => Some(keyboard::KeyCode::Add),
+            75 => Some(keyboard::KeyCode::Divide),
+            78 => Some(keyboard::KeyCode::Minus),
+            81 => Some(keyboard::KeyCode::NumpadEquals),
+            // 71 => Some(keyboard::KeyCode::KeypadClear    ),
+            76 => Some(keyboard::KeyCode::NumpadEnter),
+            49 => Some(keyboard::KeyCode::Space),
+            36 => Some(keyboard::KeyCode::Enter),
+            48 => Some(keyboard::KeyCode::Tab),
+            51 => Some(keyboard::KeyCode::Delete),
+            117 => Some(keyboard::KeyCode::Delete),
+            // 52 => Some(keyboard::KeyCode::Linefeed       ),
+            53 => Some(keyboard::KeyCode::Escape),
+            55 => Some(keyboard::KeyCode::LWin),
+            56 => Some(keyboard::KeyCode::LShift),
+            57 => Some(keyboard::KeyCode::Capital),
+            58 => Some(keyboard::KeyCode::LAlt),
+            59 => Some(keyboard::KeyCode::LControl),
+            60 => Some(keyboard::KeyCode::RShift),
+            61 => Some(keyboard::KeyCode::RAlt),
+            62 => Some(keyboard::KeyCode::RControl),
+            // 63 => Some(keyboard::KeyCode::Function       ),
+            122 => Some(keyboard::KeyCode::F1),
+            120 => Some(keyboard::KeyCode::F2),
+            99 => Some(keyboard::KeyCode::F3),
+            118 => Some(keyboard::KeyCode::F4),
+            96 => Some(keyboard::KeyCode::F5),
+            97 => Some(keyboard::KeyCode::F6),
+            98 => Some(keyboard::KeyCode::F7),
+            100 => Some(keyboard::KeyCode::F8),
+            101 => Some(keyboard::KeyCode::F9),
+            109 => Some(keyboard::KeyCode::F10),
+            103 => Some(keyboard::KeyCode::F11),
+            111 => Some(keyboard::KeyCode::F12),
+            105 => Some(keyboard::KeyCode::F13),
+            107 => Some(keyboard::KeyCode::F14),
+            113 => Some(keyboard::KeyCode::F15),
+            106 => Some(keyboard::KeyCode::F16),
+            64 => Some(keyboard::KeyCode::F17),
+            79 => Some(keyboard::KeyCode::F18),
+            80 => Some(keyboard::KeyCode::F19),
+            90 => Some(keyboard::KeyCode::F20),
+            72 => Some(keyboard::KeyCode::VolumeUp),
+            73 => Some(keyboard::KeyCode::VolumeDown),
+            74 => Some(keyboard::KeyCode::Mute),
+            114 => Some(keyboard::KeyCode::Insert),
+            115 => Some(keyboard::KeyCode::Home),
+            119 => Some(keyboard::KeyCode::End),
+            116 => Some(keyboard::KeyCode::PageUp),
+            121 => Some(keyboard::KeyCode::PageDown),
+            123 => Some(keyboard::KeyCode::Left),
+            124 => Some(keyboard::KeyCode::Right),
+            125 => Some(keyboard::KeyCode::Down),
+            126 => Some(keyboard::KeyCode::Up),
+            _ => None,
+        }
+    }
+}
+
+struct ModifierFlags(NSEventModifierFlags);
+
+impl From<ModifierFlags> for keyboard::ModifiersState {
+    fn from(flags: ModifierFlags) -> Self {
+        Self {
+            shift: flags.0.contains(NSEventModifierFlags::NSShiftKeyMask),
+            control: flags.0.contains(NSEventModifierFlags::NSControlKeyMask),
+            alt: flags.0.contains(NSEventModifierFlags::NSAlternateKeyMask),
+            logo: flags.0.contains(NSEventModifierFlags::NSCommandKeyMask),
         }
     }
 }
