@@ -594,7 +594,7 @@ impl From<NSKeyCode> for Option<keyboard::KeyCode> {
             49 => Some(keyboard::KeyCode::Space),
             36 => Some(keyboard::KeyCode::Enter),
             48 => Some(keyboard::KeyCode::Tab),
-            51 => Some(keyboard::KeyCode::Delete),
+            51 => Some(keyboard::KeyCode::Backspace),
             117 => Some(keyboard::KeyCode::Delete),
             // 52 => Some(keyboard::KeyCode::Linefeed       ),
             53 => Some(keyboard::KeyCode::Escape),
