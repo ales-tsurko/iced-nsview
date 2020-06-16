@@ -79,6 +79,8 @@ impl<A: 'static + Application> IcedView<A> {
         );
         let allocation: *const Object = msg_send![class, alloc];
         let object: *mut Object = msg_send![allocation, initWithFrame: rect];
+        // NSViewLayerContentsRedrawDuringViewResize
+        let () = msg_send![object, setLayerContentsRedrawPolicy: 2];
 
         object
     }
@@ -98,6 +100,10 @@ impl<A: 'static + Application> IcedView<A> {
 
         let update_layer: extern "C" fn(&mut Object, Sel) = Self::update_layer;
         decl.add_method(sel!(updateLayer), update_layer);
+
+        let resize: extern "C" fn(&mut Object, Sel) = Self::resize;
+        decl.add_method(sel!(viewWillStartLiveResize), resize);
+        decl.add_method(sel!(viewDidEndLiveResize), resize);
 
         let handle_event: extern "C" fn(&mut Object, Sel, *mut Object) = Self::handle_event;
         decl.add_method(sel!(mouseDown:), handle_event);
@@ -134,11 +140,31 @@ impl<A: 'static + Application> IcedView<A> {
         }
     }
 
-    extern "C" fn update_layer(this: &mut Object, _cmd: Sel) {
+    extern "C" fn update_layer(this: &mut Object, cmd: Sel) {
         unsafe {
+            let in_resize: BOOL = msg_send![this, inLiveResize];
+            if in_resize != 0 {
+                Self::resize(this, cmd);
+            }
+
             let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
             let event_handler = *value as *mut EventHandler<A>;
             (*event_handler).redraw();
+        }
+    }
+
+    extern "C" fn resize(this: &mut Object, _cmd: Sel) {
+        unsafe {
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+            let this_ptr: *mut Object = this;
+            let bounds = NSView::bounds(this_ptr);
+            let parent_window: *mut Object = msg_send![this, window];
+            let scale_factor: CGFloat = msg_send![parent_window, backingScaleFactor];
+            (*event_handler).resize(
+                Size::new(bounds.size.width as u32, bounds.size.height as u32),
+                scale_factor,
+            );
         }
     }
 
@@ -226,6 +252,9 @@ impl<A: 'static + Application> EventHandler<A> {
         let () = msg_send![layer, setBounds: bounds];
         let () = msg_send![layer, setContentsScale: scale];
         let () = msg_send![layer, setAnchorPoint: CGPoint::new(0.0, 0.0)];
+        // kCALayerWidthSizable | kCALayerHeightSizable
+        let autoresizing_mask = 1u64 << 1 | 1 << 4;
+        let () = msg_send![layer, setAutoresizingMask: autoresizing_mask];
         let _: *mut c_void = msg_send![view, retain];
 
         wgpu::Surface::create_surface_from_core_animation_layer(layer as *mut c_void)
@@ -270,6 +299,30 @@ impl<A: 'static + Application> EventHandler<A> {
                 present_mode: wgpu::PresentMode::Mailbox,
             },
         )
+    }
+
+    fn resize(&mut self, new_size: Size<u32>, scale_factor: f64) {
+        self.viewport = Viewport::with_physical_size(new_size, scale_factor);
+
+        self.swap_chain = self.device.create_swap_chain(
+            &self.surface,
+            &wgpu::SwapChainDescriptor {
+                usage: wgpu::TextureUsage::OUTPUT_ATTACHMENT,
+                format: self.format,
+                width: new_size.width,
+                height: new_size.height,
+                present_mode: wgpu::PresentMode::Mailbox,
+            },
+        );
+
+        self.on_window_event(window::Event::Resized {
+            width: new_size.width,
+            height: new_size.height,
+        });
+    }
+
+    fn on_window_event(&mut self, event: window::Event) {
+        self.queue_event(Event::Window(event));
     }
 
     fn queue_event(&mut self, event: Event) {

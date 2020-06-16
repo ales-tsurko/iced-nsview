@@ -43,7 +43,9 @@ unsafe fn init_window(size: &Size<u32>) -> id {
                 NSPoint::new(0.0, 0.0),
                 NSSize::new(size.width as f64, size.height as f64),
             ),
-            NSWindowStyleMask::NSTitledWindowMask,
+            NSWindowStyleMask::NSTitledWindowMask
+                | NSWindowStyleMask::NSClosableWindowMask
+                | NSWindowStyleMask::NSResizableWindowMask,
             NSBackingStoreBuffered,
             NO,
         )
