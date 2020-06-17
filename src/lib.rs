@@ -1,6 +1,6 @@
 //! This crate allows you to use Iced as NSView. Thus it makes Iced embeddable into a macOS
 //! application or AU/VST plugins, for example.
-//! 
+//!
 //! ## Usage
 //!
 //! You should implement your GUI using `Application` trait, then you can initialize `IcedView`
@@ -24,12 +24,14 @@
 
 pub mod widget;
 
-use std::ffi::c_void;
+use std::ffi::{c_void, CStr};
 use std::marker::PhantomData;
 
-use cocoa::appkit::{NSEvent, NSEventModifierFlags, NSEventType, NSView};
+use cocoa::appkit::{
+    NSEvent, NSEventModifierFlags, NSEventType, NSPasteboard, NSPasteboardTypeString, NSView,
+};
 use cocoa::base::{id, nil, BOOL};
-use cocoa::foundation::{NSPoint, NSRect, NSSize};
+use cocoa::foundation::{NSPoint, NSRect, NSSize, NSString};
 
 use core_graphics::base::CGFloat;
 use core_graphics::geometry::{CGPoint, CGRect};
@@ -38,7 +40,7 @@ use iced_wgpu::{wgpu, Backend, Renderer, Settings};
 
 pub use iced_wgpu::Viewport;
 
-use iced_native::{program, window, Debug, Element as NativeElement, Event};
+use iced_native::{program, window, Clipboard, Debug, Element as NativeElement, Event};
 
 pub use iced_native::{
     futures, keyboard, mouse, Align, Background, Color, Command, Font, HorizontalAlignment, Length,
@@ -226,6 +228,7 @@ struct EventHandler<A: 'static + Application> {
     swap_chain: wgpu::SwapChain,
     debug: Debug,
     renderer: Renderer,
+    pasteboard: Pasteboard,
 }
 
 impl<A: 'static + Application> EventHandler<A> {
@@ -251,6 +254,7 @@ impl<A: 'static + Application> EventHandler<A> {
             swap_chain,
             debug,
             renderer,
+            pasteboard: Pasteboard::new(),
         }
     }
 
@@ -365,7 +369,7 @@ impl<A: 'static + Application> EventHandler<A> {
 
     fn update_state(&mut self) {
         self.state.update(
-            None,
+            Some(&self.pasteboard),
             self.viewport.logical_size(),
             &mut self.renderer,
             &mut self.debug,
@@ -689,6 +693,34 @@ impl From<ButtonNumber> for mouse::Button {
         match number.0 {
             2 => mouse::Button::Middle,
             value => mouse::Button::Other(value as u8),
+        }
+    }
+}
+
+struct Pasteboard {
+    object: id,
+}
+
+impl Pasteboard {
+    fn new() -> Self {
+        let object = unsafe { NSPasteboard::generalPasteboard(nil) };
+
+        Self { object }
+    }
+}
+
+impl Clipboard for Pasteboard {
+    fn content(&self) -> Option<String> {
+        let ptr = unsafe {
+            self.object
+                .stringForType(NSPasteboardTypeString)
+                .UTF8String()
+        };
+
+        if ptr.is_null() {
+            None
+        } else {
+            unsafe { Some(CStr::from_ptr(ptr).to_string_lossy().to_string()) }
         }
     }
 }
