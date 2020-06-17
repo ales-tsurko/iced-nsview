@@ -20,6 +20,8 @@
     unreachable_pub
 )]
 
+pub mod widget;
+
 use std::ffi::c_void;
 use std::marker::PhantomData;
 
@@ -34,13 +36,21 @@ use iced_wgpu::{wgpu, Backend, Renderer, Settings};
 
 pub use iced_wgpu::Viewport;
 
-pub use iced_native::{Element as NativeElement, *};
+use iced_native::{program, window, Debug, Element as NativeElement, Event};
+
+pub use iced_native::{
+    futures, keyboard, mouse, Align, Background, Color, Command, Font, HorizontalAlignment, Length,
+    Point, Rectangle, Size, Vector, VerticalAlignment,
+};
 
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, Sel, YES};
 use objc::{class, msg_send, sel, sel_impl};
 
 pub use objc::runtime::Object;
+
+#[doc(no_inline)]
+pub use widget::*;
 
 /// A composition of widgets.
 pub type Element<'a, M> = NativeElement<'a, M, Renderer>;
@@ -333,6 +343,8 @@ impl<A: 'static + Application> EventHandler<A> {
         self.update_state();
 
         if let Ok(frame) = self.swap_chain.get_next_texture() {
+            self.debug.render_started();
+
             let mut encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -342,6 +354,8 @@ impl<A: 'static + Application> EventHandler<A> {
             let mouse_interaction = self.render_pass_iced(&frame, &mut encoder);
 
             self.queue.submit(&[encoder.finish()]);
+
+            self.debug.render_finished();
 
             self.set_cursor_icon(mouse_interaction);
         }
@@ -424,10 +438,7 @@ pub trait Application {
 
     /// Returns the background color of the [`Application`].
     ///
-    /// By default, it returns [`Color::WHITE`].
-    ///
-    /// [`Application`]: trait.Application.html
-    /// [`Color::WHITE`]: struct.Color.html#const.WHITE
+    /// By default, it returns `Color::WHITE`.
     fn background_color(&self) -> Color {
         Color::WHITE
     }
