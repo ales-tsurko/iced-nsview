@@ -357,6 +357,8 @@ impl<A: 'static + Application> EventHandler<A> {
     }
 
     fn render_pass(&mut self, frame: &wgpu::SwapChainOutput, encoder: &mut wgpu::CommandEncoder) {
+        let background_color = self.state.program().application.background_color();
+
         encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
                 attachment: &frame.view,
@@ -364,10 +366,10 @@ impl<A: 'static + Application> EventHandler<A> {
                 load_op: wgpu::LoadOp::Clear,
                 store_op: wgpu::StoreOp::Store,
                 clear_color: wgpu::Color {
-                    r: 1.0,
-                    g: 1.0,
-                    b: 1.0,
-                    a: 1.0,
+                    r: background_color.r as f64,
+                    g: background_color.g as f64,
+                    b: background_color.b as f64,
+                    a: background_color.a as f64,
                 },
             }],
             depth_stencil_attachment: None,
@@ -419,6 +421,16 @@ pub trait Application {
 
     /// Application interface.
     fn view(&mut self) -> Element<'_, Self::Message>;
+
+    /// Returns the background color of the [`Application`].
+    ///
+    /// By default, it returns [`Color::WHITE`].
+    ///
+    /// [`Application`]: trait.Application.html
+    /// [`Color::WHITE`]: struct.Color.html#const.WHITE
+    fn background_color(&self) -> Color {
+        Color::WHITE
+    }
 }
 
 struct Program<A: Application> {
@@ -561,7 +573,7 @@ impl From<NSKeyCode> for Option<keyboard::KeyCode> {
             7 => Some(keyboard::KeyCode::X),
             16 => Some(keyboard::KeyCode::Y),
             6 => Some(keyboard::KeyCode::Z),
-            // 10 => Some(keyboard::KeyCode::SectionSign    ),
+            // 10 => Some(::SectionSign),
             50 => Some(keyboard::KeyCode::Grave),
             27 => Some(keyboard::KeyCode::Minus),
             24 => Some(keyboard::KeyCode::Equals),
@@ -589,14 +601,14 @@ impl From<NSKeyCode> for Option<keyboard::KeyCode> {
             75 => Some(keyboard::KeyCode::Divide),
             78 => Some(keyboard::KeyCode::Minus),
             81 => Some(keyboard::KeyCode::NumpadEquals),
-            // 71 => Some(keyboard::KeyCode::KeypadClear    ),
+            // 71 => Some(::KeypadClear),
             76 => Some(keyboard::KeyCode::NumpadEnter),
             49 => Some(keyboard::KeyCode::Space),
             36 => Some(keyboard::KeyCode::Enter),
             48 => Some(keyboard::KeyCode::Tab),
             51 => Some(keyboard::KeyCode::Backspace),
             117 => Some(keyboard::KeyCode::Delete),
-            // 52 => Some(keyboard::KeyCode::Linefeed       ),
+            // 52 => Some(::Linefeed),
             53 => Some(keyboard::KeyCode::Escape),
             55 => Some(keyboard::KeyCode::LWin),
             56 => Some(keyboard::KeyCode::LShift),
@@ -606,7 +618,7 @@ impl From<NSKeyCode> for Option<keyboard::KeyCode> {
             60 => Some(keyboard::KeyCode::RShift),
             61 => Some(keyboard::KeyCode::RAlt),
             62 => Some(keyboard::KeyCode::RControl),
-            // 63 => Some(keyboard::KeyCode::Function       ),
+            // 63 => Some(::Function),
             122 => Some(keyboard::KeyCode::F1),
             120 => Some(keyboard::KeyCode::F2),
             99 => Some(keyboard::KeyCode::F3),
