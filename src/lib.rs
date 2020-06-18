@@ -186,10 +186,8 @@ impl<A: 'static + Application> IcedView<A> {
         unsafe {
             let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
             let event_handler = *value as *mut EventHandler<A>;
-            if let Some(event) = NSEventT(event).into() {
-                (*event_handler).queue_event(event);
-                let () = msg_send![this, setNeedsDisplay: YES];
-            }
+            (*event_handler).queue_event(NSEventT(event).into());
+            let () = msg_send![this, setNeedsDisplay: YES];
         };
     }
 
@@ -338,11 +336,11 @@ impl<A: 'static + Application> EventHandler<A> {
     }
 
     fn on_window_event(&mut self, event: window::Event) {
-        self.queue_event(Event::Window(event));
+        self.queue_event(vec![Event::Window(event)]);
     }
 
-    fn queue_event(&mut self, event: Event) {
-        self.state.queue_event(event);
+    fn queue_event(&mut self, events: Vec<Event>) {
+        events.into_iter().for_each(|e| self.state.queue_event(e));
     }
 
     fn redraw(&mut self) {
@@ -476,7 +474,7 @@ impl<A: Application> program::Program for Program<A> {
 
 struct NSEventT<T: NSEvent + Copy>(T);
 
-impl<T: NSEvent + Copy> From<NSEventT<T>> for Option<Event> {
+impl<T: NSEvent + Copy> From<NSEventT<T>> for Vec<Event> {
     fn from(event: NSEventT<T>) -> Self {
         unsafe {
             let mouse_location: NSPoint = NSEvent::locationInWindow(event.0);
@@ -487,66 +485,85 @@ impl<T: NSEvent + Copy> From<NSEventT<T>> for Option<Event> {
             let button_num = NSEvent::buttonNumber(event.0);
 
             match NSEvent::eventType(event.0) {
-                NSEventType::NSLeftMouseDown => Some(Event::Mouse(mouse::Event::ButtonPressed(
+                NSEventType::NSLeftMouseDown => vec![Event::Mouse(mouse::Event::ButtonPressed(
                     mouse::Button::Left,
-                ))),
-                NSEventType::NSLeftMouseUp => Some(Event::Mouse(mouse::Event::ButtonReleased(
+                ))],
+                NSEventType::NSLeftMouseUp => vec![Event::Mouse(mouse::Event::ButtonReleased(
                     mouse::Button::Left,
-                ))),
-                NSEventType::NSRightMouseDown => Some(Event::Mouse(mouse::Event::ButtonPressed(
+                ))],
+                NSEventType::NSRightMouseDown => vec![Event::Mouse(mouse::Event::ButtonPressed(
                     mouse::Button::Right,
-                ))),
-                NSEventType::NSRightMouseUp => Some(Event::Mouse(mouse::Event::ButtonReleased(
+                ))],
+                NSEventType::NSRightMouseUp => vec![Event::Mouse(mouse::Event::ButtonReleased(
                     mouse::Button::Right,
-                ))),
-                NSEventType::NSMouseMoved => Some(moved),
-                NSEventType::NSLeftMouseDragged => Some(moved),
-                NSEventType::NSMouseEntered => Some(Event::Mouse(mouse::Event::CursorEntered)),
-                NSEventType::NSMouseExited => Some(Event::Mouse(mouse::Event::CursorLeft)),
-                NSEventType::NSKeyDown => from_key_down(event.0),
-                NSEventType::NSKeyUp => from_key_up(event.0),
-                NSEventType::NSScrollWheel => Some(Event::Mouse(mouse::Event::WheelScrolled {
+                ))],
+                NSEventType::NSMouseMoved => vec![moved],
+                NSEventType::NSLeftMouseDragged => vec![moved],
+                NSEventType::NSMouseEntered => vec![Event::Mouse(mouse::Event::CursorEntered)],
+                NSEventType::NSMouseExited => vec![Event::Mouse(mouse::Event::CursorLeft)],
+                NSEventType::NSKeyDown => event.as_key_down(),
+                NSEventType::NSKeyUp => event.as_key_up(),
+                NSEventType::NSScrollWheel => vec![Event::Mouse(mouse::Event::WheelScrolled {
                     delta: mouse::ScrollDelta::Pixels {
                         x: NSEvent::scrollingDeltaX(event.0) as f32,
                         y: NSEvent::scrollingDeltaY(event.0) as f32,
                     },
-                })),
-                NSEventType::NSOtherMouseDown => Some(Event::Mouse(mouse::Event::ButtonPressed(
+                })],
+                NSEventType::NSOtherMouseDown => vec![Event::Mouse(mouse::Event::ButtonPressed(
                     ButtonNumber(button_num).into(),
-                ))),
-                NSEventType::NSOtherMouseUp => Some(Event::Mouse(mouse::Event::ButtonReleased(
+                ))],
+                NSEventType::NSOtherMouseUp => vec![Event::Mouse(mouse::Event::ButtonReleased(
                     ButtonNumber(button_num).into(),
-                ))),
-                _ => None,
+                ))],
+                _ => vec![],
             }
         }
     }
 }
 
-unsafe fn from_key_down<T: NSEvent + Copy>(event: T) -> Option<Event> {
-    let modifiers = keyboard::ModifiersState::from(ModifierFlags(NSEvent::modifierFlags(event)));
-    let kc = Option::<keyboard::KeyCode>::from(NSKeyCode(NSEvent::keyCode(event)));
-    // let chars = NSEvent::characters(event);
+impl<T: NSEvent + Copy> NSEventT<T> {
+    unsafe fn as_key_down(self) -> Vec<Event> {
+        let event = self.0;
+        let modifiers =
+            keyboard::ModifiersState::from(ModifierFlags(NSEvent::modifierFlags(event)));
 
-    kc.map(|kc| {
-        Event::Keyboard(keyboard::Event::KeyPressed {
-            key_code: kc,
-            modifiers,
-        })
-    })
-}
+        [
+            self.into_chars(),
+            Option::<keyboard::KeyCode>::from(NSKeyCode(NSEvent::keyCode(event)))
+                .map(|kc| {
+                    vec![Event::Keyboard(keyboard::Event::KeyPressed {
+                        key_code: kc,
+                        modifiers,
+                    })]
+                })
+                .unwrap_or_default(),
+        ]
+        .concat()
+    }
 
-unsafe fn from_key_up<T: NSEvent + Copy>(event: T) -> Option<Event> {
-    let modifiers = keyboard::ModifiersState::from(ModifierFlags(NSEvent::modifierFlags(event)));
-    let kc = Option::<keyboard::KeyCode>::from(NSKeyCode(NSEvent::keyCode(event)));
-    // let chars = NSEvent::characters(event);
+    unsafe fn into_chars(self) -> Vec<Event> {
+        let chars = NSEvent::characters(self.0);
+        let ptr = chars.UTF8String();
+        CStr::from_ptr(ptr)
+            .to_string_lossy()
+            .chars()
+            .map(|c| Event::Keyboard(keyboard::Event::CharacterReceived(c)))
+            .collect()
+    }
 
-    kc.map(|kc| {
-        Event::Keyboard(keyboard::Event::KeyReleased {
-            key_code: kc,
-            modifiers,
-        })
-    })
+    unsafe fn as_key_up(self) -> Vec<Event> {
+        let modifiers =
+            keyboard::ModifiersState::from(ModifierFlags(NSEvent::modifierFlags(self.0)));
+
+        Option::<keyboard::KeyCode>::from(NSKeyCode(NSEvent::keyCode(self.0)))
+            .map(|kc| {
+                vec![Event::Keyboard(keyboard::Event::KeyReleased {
+                    key_code: kc,
+                    modifiers,
+                })]
+            })
+            .unwrap_or_default()
+    }
 }
 
 struct NSKeyCode(u16);
