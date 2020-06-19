@@ -677,18 +677,10 @@ impl<'a> Step {
 }
 
 fn ferris<'a>(width: u16) -> Container<'a, StepMessage> {
-    Container::new(
-        // This should go away once we unify resource loading on native
-        // platforms
-        if cfg!(target_arch = "wasm32") {
-            Image::new("images/ferris.png")
-        } else {
-            Image::new(format!("{}/images/ferris.png", env!("CARGO_MANIFEST_DIR")))
-        }
-        .width(Length::Units(width)),
-    )
-    .width(Length::Fill)
-    .center_x()
+    let path = format!("{}/examples/images/ferris.png", env!("CARGO_MANIFEST_DIR"));
+    Container::new(Image::new(path).width(Length::Units(width)))
+        .width(Length::Fill)
+        .center_x()
 }
 
 fn button<'a, Message>(state: &'a mut button::State, label: &str) -> Button<'a, Message> {

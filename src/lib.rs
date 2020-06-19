@@ -821,9 +821,14 @@ impl Pasteboard {
 impl Clipboard for Pasteboard {
     fn content(&self) -> Option<String> {
         let ptr = unsafe {
-            self.object
-                .stringForType(NSPasteboardTypeString)
-                .UTF8String()
+            let class = class!(NSString);
+            let class_ref: *mut Object = msg_send![class, self];
+            let classes = NSArray::arrayWithObject(nil, class_ref);
+            let objects = self.object.readObjectsForClasses_options(classes, nil);
+            if objects.is_null() || objects.count() == 0 {
+                return None;
+            }
+            NSString::UTF8String(objects.objectAtIndex(0))
         };
 
         if ptr.is_null() {
