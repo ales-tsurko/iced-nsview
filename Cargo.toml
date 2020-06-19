@@ -1,5 +1,5 @@
 [package]
-name = "iced-cocoa"
+name = "iced-nsview"
 version = "0.1.0"
 authors = ["Ales Tsurko <ales.tsurko@gmail.com>"]
 edition = "2018"
@@ -8,5 +8,7 @@ edition = "2018"
 
 [dependencies]
 cocoa = "0.20"
-iced_native = "0.2"
+core-graphics = "0.19"
+iced_native = { git = "https://github.com/hecrj/iced.git" }
+iced_wgpu = { git = "https://github.com/hecrj/iced.git", features = [ "canvas" ] }
 objc = "0.2"
