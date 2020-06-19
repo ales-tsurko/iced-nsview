@@ -26,12 +26,15 @@ pub mod widget;
 
 use std::ffi::{c_void, CStr};
 use std::marker::PhantomData;
+use std::os::raw::c_char;
+use std::path::PathBuf;
 
 use cocoa::appkit::{
-    NSEvent, NSEventModifierFlags, NSEventType, NSPasteboard, NSPasteboardTypeString, NSView,
+    NSEvent, NSEventModifierFlags, NSEventType, NSPasteboard, NSPasteboardTypeString,
+    NSURLPboardType, NSView,
 };
 use cocoa::base::{id, nil, BOOL};
-use cocoa::foundation::{NSPoint, NSRect, NSSize, NSString};
+use cocoa::foundation::{NSArray, NSPoint, NSRect, NSSize, NSString, NSUInteger};
 
 use core_graphics::base::CGFloat;
 use core_graphics::geometry::{CGPoint, CGRect};
@@ -67,6 +70,7 @@ pub struct IcedView<A: 'static + Application> {
 
 impl<A: 'static + Application> IcedView<A> {
     const EVENT_HANDLER_IVAR: &'static str = "_event_handler";
+    const DID_EXIT_DRAG: &'static str = "_did_exit_drag";
 
     /// Constructor.
     pub fn new(application: A, viewport: Viewport) -> Self {
@@ -95,6 +99,8 @@ impl<A: 'static + Application> IcedView<A> {
         let object: *mut Object = msg_send![allocation, initWithFrame: rect];
         // NSViewLayerContentsRedrawDuringViewResize
         let () = msg_send![object, setLayerContentsRedrawPolicy: 2];
+        let types = NSArray::arrayWithObject(nil, NSURLPboardType);
+        let () = msg_send![object, registerForDraggedTypes: types];
 
         object
     }
@@ -104,6 +110,7 @@ impl<A: 'static + Application> IcedView<A> {
         let mut decl =
             ClassDecl::new("IcedView", superclass).expect("Can't declare IcedView class.");
         decl.add_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+        decl.add_ivar::<bool>(Self::DID_EXIT_DRAG);
 
         let accepts_first_responder: extern "C" fn(&Object, Sel) -> BOOL =
             Self::accepts_first_responder;
@@ -118,6 +125,14 @@ impl<A: 'static + Application> IcedView<A> {
         let resize: extern "C" fn(&mut Object, Sel) = Self::resize;
         decl.add_method(sel!(viewWillStartLiveResize), resize);
         decl.add_method(sel!(viewDidEndLiveResize), resize);
+
+        let dragging_entered: extern "C" fn(&mut Object, Sel, *mut Object) -> NSUInteger =
+            Self::dragging_entered;
+        decl.add_method(sel!(draggingEntered:), dragging_entered);
+        let dragging_ended: extern "C" fn(&mut Object, Sel, *mut Object) = Self::dragging_ended;
+        decl.add_method(sel!(draggingEnded:), dragging_ended);
+        let dragging_exited: extern "C" fn(&mut Object, Sel, *mut Object) = Self::dragging_exited;
+        decl.add_method(sel!(draggingExited:), dragging_exited);
 
         let handle_event: extern "C" fn(&mut Object, Sel, *mut Object) = Self::handle_event;
         decl.add_method(sel!(mouseDown:), handle_event);
@@ -179,6 +194,65 @@ impl<A: 'static + Application> IcedView<A> {
                 Size::new(bounds.size.width as u32, bounds.size.height as u32),
                 scale_factor,
             );
+        }
+    }
+
+    extern "C" fn dragging_entered(
+        this: &mut Object,
+        _cmd: Sel,
+        sender: *mut Object,
+    ) -> NSUInteger {
+        unsafe {
+            this.set_ivar::<bool>(Self::DID_EXIT_DRAG, false);
+
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+
+            Self::paths_from_dragged_info(sender)
+                .into_iter()
+                .for_each(|pathbuf| {
+                    (*event_handler).on_window_event(window::Event::FileHovered(pathbuf));
+                });
+        }
+        // NSDragOperationEvery
+        NSUInteger::MAX
+    }
+
+    extern "C" fn dragging_ended(this: &mut Object, _cmd: Sel, sender: *mut Object) {
+        unsafe {
+            if *this.get_ivar::<bool>(Self::DID_EXIT_DRAG) {
+                return;
+            }
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+
+            Self::paths_from_dragged_info(sender)
+                .into_iter()
+                .for_each(|pathbuf| {
+                    (*event_handler).on_window_event(window::Event::FileDropped(pathbuf));
+                });
+        }
+    }
+
+    unsafe fn paths_from_dragged_info(info: *mut Object) -> Vec<PathBuf> {
+        let pasteboard: id = msg_send![info, draggingPasteboard];
+        let class = class!(NSURL);
+        let class_ref: *mut Object = msg_send![class, self];
+        let classes = NSArray::arrayWithObject(nil, class_ref);
+        let items: id = msg_send![pasteboard, readObjectsForClasses: classes options: nil];
+        (0..items.count())
+            .into_iter()
+            .map(|n| pathbuf_from_nsurl(items.objectAtIndex(n)))
+            .collect()
+    }
+
+    extern "C" fn dragging_exited(this: &mut Object, _cmd: Sel, _sender: *mut Object) {
+        unsafe {
+            this.set_ivar::<bool>(Self::DID_EXIT_DRAG, true);
+            let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
+            let event_handler = *value as *mut EventHandler<A>;
+
+            (*event_handler).on_window_event(window::Event::FilesHoveredLeft);
         }
     }
 
@@ -740,6 +814,11 @@ impl Clipboard for Pasteboard {
             unsafe { Some(CStr::from_ptr(ptr).to_string_lossy().to_string()) }
         }
     }
+}
+
+unsafe fn pathbuf_from_nsurl(url: *mut Object) -> PathBuf {
+    let ptr: *const c_char = msg_send![url, fileSystemRepresentation];
+    CStr::from_ptr(ptr).to_string_lossy().to_string().into()
 }
 
 /// This function returns scale factor of the passed view.
