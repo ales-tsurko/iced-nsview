@@ -82,15 +82,12 @@ impl Application for Controls {
     }
 
     fn view(&mut self) -> Element<Message> {
-        let slider = Row::new()
-            .width(Length::Units(500))
-            .spacing(20)
-            .push(Slider::new(
-                &mut self.slider,
-                0.0..=1.0,
-                self.amp,
-                move |r| Message::AmpChanged(r),
-            ));
+        let slider = Row::new().width(Length::Units(500)).spacing(20).push(
+            Slider::new(&mut self.slider, 0.0..=1.0, self.amp, move |r| {
+                Message::AmpChanged(r)
+            })
+            .step(0.001),
+        );
 
         Row::new()
             .width(Length::Fill)
