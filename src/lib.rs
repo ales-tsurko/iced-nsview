@@ -30,8 +30,7 @@ use std::os::raw::c_char;
 use std::path::PathBuf;
 
 use cocoa::appkit::{
-    NSEvent, NSEventModifierFlags, NSEventType, NSPasteboard, NSPasteboardTypeString,
-    NSURLPboardType, NSView,
+    NSEvent, NSEventModifierFlags, NSEventType, NSPasteboard, NSURLPboardType, NSView,
 };
 use cocoa::base::{id, nil, BOOL};
 use cocoa::foundation::{NSArray, NSPoint, NSRect, NSSize, NSString, NSUInteger};
@@ -39,7 +38,7 @@ use cocoa::foundation::{NSArray, NSPoint, NSRect, NSSize, NSString, NSUInteger};
 use core_graphics::base::CGFloat;
 use core_graphics::geometry::{CGPoint, CGRect};
 
-use iced_wgpu::{wgpu, Backend, Renderer, Settings};
+use iced_wgpu::{settings, wgpu, Backend, Renderer, Settings as RendererSettings};
 
 pub use iced_wgpu::Viewport;
 
@@ -73,9 +72,9 @@ impl<A: 'static + Application> IcedView<A> {
     const DID_EXIT_DRAG: &'static str = "_did_exit_drag";
 
     /// Constructor.
-    pub fn new(application: A, viewport: Viewport) -> Self {
+    pub fn new(application: A, viewport: Viewport, settings: Settings) -> Self {
         let object = unsafe { Self::init_nsview(viewport.physical_size()) };
-        let event_handler = EventHandler::new(application, object, viewport);
+        let event_handler = EventHandler::new(application, object, viewport, settings);
         unsafe {
             (*object).set_ivar(
                 Self::EVENT_HANDLER_IVAR,
@@ -303,6 +302,94 @@ impl<A: 'static + Application> Drop for IcedView<A> {
     }
 }
 
+/// Implement this trait for your application then pass it into `IcedView::new`.
+pub trait Application {
+    /// The message your application will produce.
+    type Message: Clone + std::fmt::Debug + Send;
+
+    /// Message processing function.
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message>;
+
+    /// Application interface.
+    fn view(&mut self) -> Element<'_, Self::Message>;
+
+    /// Returns the background color of the [`Application`].
+    ///
+    /// By default, it returns `Color::WHITE`.
+    fn background_color(&self) -> Color {
+        Color::WHITE
+    }
+}
+
+/// The settings of the view.
+#[derive(Debug)]
+pub struct Settings {
+    /// The bytes of the font that will be used by default.
+    ///
+    /// If `None` is provided, a default system font will be chosen.
+    pub default_font: Option<&'static [u8]>,
+    /// The default size of text.
+    ///
+    /// By default, it will be set to 20.
+    pub default_text_size: u16,
+    /// If set to true, the renderer will try to perform antialiasing for some primitives.
+    ///
+    /// Enabling it can produce a smoother result in some widgets, like the `Canvas`, at a
+    /// performance cost.
+    ///
+    /// By default, it is disabled.
+    pub antialiasing: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            default_font: Some(include_bytes!("../fonts/OpenSans-Regular.ttf")),
+            default_text_size: 20,
+            antialiasing: false,
+        }
+    }
+}
+
+impl From<Settings> for RendererSettings {
+    fn from(settings: Settings) -> RendererSettings {
+        Self {
+            default_font: settings.default_font,
+            default_text_size: settings.default_text_size,
+            antialiasing: if settings.antialiasing {
+                Some(settings::Antialiasing::MSAAx4)
+            } else {
+                None
+            },
+            ..Default::default()
+        }
+    }
+}
+
+struct Program<A: Application> {
+    application: A,
+}
+
+impl<A: Application> Program<A> {
+    fn new(application: A) -> Self {
+        Self { application }
+    }
+}
+
+impl<A: Application> program::Program for Program<A> {
+    type Renderer = Renderer;
+    type Message = A::Message;
+
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+        self.application.update(message)
+    }
+
+    /// Application interface.
+    fn view(&mut self) -> NativeElement<'_, Self::Message, Self::Renderer> {
+        self.application.view()
+    }
+}
+
 struct EventHandler<A: 'static + Application> {
     state: program::State<Program<A>>,
     viewport: Viewport,
@@ -317,14 +404,14 @@ struct EventHandler<A: 'static + Application> {
 }
 
 impl<A: 'static + Application> EventHandler<A> {
-    fn new(application: A, object: *mut Object, viewport: Viewport) -> Self {
+    fn new(application: A, object: *mut Object, viewport: Viewport, settings: Settings) -> Self {
         let surface = unsafe { Self::init_surface_layer(object, viewport.scale_factor()) };
         let (mut device, queue) = Self::init_device_and_queue(&surface);
         let format = wgpu::TextureFormat::Bgra8UnormSrgb;
         let swap_chain =
             Self::init_swap_chain(&viewport.physical_size(), &device, &surface, &format);
         let mut debug = Debug::new();
-        let mut renderer = Renderer::new(Backend::new(&mut device, Settings::default()));
+        let mut renderer = Renderer::new(Backend::new(&mut device, settings.into()));
         let program = Program::new(application);
         let state: program::State<Program<A>> =
             program::State::new(program, viewport.logical_size(), &mut renderer, &mut debug);
@@ -453,12 +540,14 @@ impl<A: 'static + Application> EventHandler<A> {
     }
 
     fn update_state(&mut self) {
-        self.state.update(
-            Some(&self.pasteboard),
-            self.viewport.logical_size(),
-            &mut self.renderer,
-            &mut self.debug,
-        );
+        if !self.state.is_queue_empty() {
+            self.state.update(
+                Some(&self.pasteboard),
+                self.viewport.logical_size(),
+                &mut self.renderer,
+                &mut self.debug,
+            );
+        }
     }
 
     fn render_pass(&mut self, frame: &wgpu::SwapChainOutput, encoder: &mut wgpu::CommandEncoder) {
@@ -513,49 +602,6 @@ impl<A: 'static + Application> EventHandler<A> {
 
             let () = msg_send![cocoa_cursor, set];
         }
-    }
-}
-
-/// Implement this trait for your application then pass it into `IcedView::new`.
-pub trait Application {
-    /// The message your application will produce.
-    type Message: Clone + std::fmt::Debug + Send;
-
-    /// Message processing function.
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message>;
-
-    /// Application interface.
-    fn view(&mut self) -> Element<'_, Self::Message>;
-
-    /// Returns the background color of the [`Application`].
-    ///
-    /// By default, it returns `Color::WHITE`.
-    fn background_color(&self) -> Color {
-        Color::WHITE
-    }
-}
-
-struct Program<A: Application> {
-    application: A,
-}
-
-impl<A: Application> Program<A> {
-    fn new(application: A) -> Self {
-        Self { application }
-    }
-}
-
-impl<A: Application> program::Program for Program<A> {
-    type Renderer = Renderer;
-    type Message = A::Message;
-
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-        self.application.update(message)
-    }
-
-    /// Application interface.
-    fn view(&mut self) -> NativeElement<'_, Self::Message, Self::Renderer> {
-        self.application.view()
     }
 }
 

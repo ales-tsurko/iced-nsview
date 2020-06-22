@@ -7,8 +7,8 @@ use cocoa::foundation::{NSAutoreleasePool, NSPoint, NSRect, NSSize};
 
 use iced_nsview::{
     button, scrollable, slider, text_input, Application, Button, Checkbox, Color, Column, Command,
-    Container, Element, HorizontalAlignment, IcedView, Image, Length, Radio, Row, Scrollable, Size,
-    Slider, Space, Text, TextInput, Viewport,
+    Container, Element, HorizontalAlignment, IcedView, Image, Length, Radio, Row, Scrollable,
+    Settings, Size, Slider, Space, Text, TextInput, Viewport,
 };
 
 pub fn main() {
@@ -19,7 +19,7 @@ pub fn main() {
 
     let tour = Tour::new();
     let viewport = Viewport::with_physical_size(size, scale_factor);
-    let view = IcedView::new(tour, viewport);
+    let view = IcedView::new(tour, viewport, Settings::default());
 
     unsafe {
         NSWindow::setContentView_(window, view.raw_object());
@@ -380,6 +380,7 @@ impl<'a> Step {
         Self::container("Welcome!")
             .push(Text::new(
                 "This is a simple tour meant to showcase a bunch of widgets \
+                и вот этот текст с юникодом, должен тоже работать, если проблема не шрифт \
                  that can be easily implemented on top of Iced.",
             ))
             .push(Text::new(
