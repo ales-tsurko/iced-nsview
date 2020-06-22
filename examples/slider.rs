@@ -6,8 +6,8 @@ use cocoa::base::{id, nil, NO};
 use cocoa::foundation::{NSAutoreleasePool, NSPoint, NSRect, NSSize};
 
 use iced_nsview::{
-    slider, Align, Application, Column, Command, Element, IcedView, Length, Row, Size, Slider,
-    Text, Viewport,
+    slider, Align, Application, Column, Command, Element, IcedView, Length, Row, Settings, Size,
+    Slider, Text, Viewport,
 };
 
 fn main() {
@@ -18,7 +18,7 @@ fn main() {
 
     let controls = Controls::new();
     let viewport = Viewport::with_physical_size(size, scale_factor);
-    let view = IcedView::new(controls, viewport);
+    let view = IcedView::new(controls, viewport, Settings::default());
 
     unsafe {
         NSWindow::setContentView_(window, view.raw_object());
