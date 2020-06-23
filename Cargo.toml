@@ -10,5 +10,5 @@ edition = "2018"
 cocoa = "0.20"
 core-graphics = "0.19"
 iced_native = { git = "https://github.com/hecrj/iced.git" }
-iced_wgpu = { git = "https://github.com/hecrj/iced.git", features = [ "canvas" ] }
+iced_wgpu = { git = "https://github.com/hecrj/iced.git", features = [ "canvas", "image" ] }
 objc = "0.2"
