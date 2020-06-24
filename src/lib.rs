@@ -70,6 +70,7 @@ pub struct IcedView<A: 'static + Application> {
 impl<A: 'static + Application> IcedView<A> {
     const EVENT_HANDLER_IVAR: &'static str = "_event_handler";
     const DID_EXIT_DRAG: &'static str = "_did_exit_drag";
+    const CURSOR_LOCATION: &'static str = "_cursor_location";
 
     /// Constructor.
     pub fn new(application: A, viewport: Viewport, settings: Settings) -> Self {
@@ -110,6 +111,7 @@ impl<A: 'static + Application> IcedView<A> {
             ClassDecl::new("IcedView", superclass).expect("Can't declare IcedView class.");
         decl.add_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
         decl.add_ivar::<bool>(Self::DID_EXIT_DRAG);
+        decl.add_ivar::<NSPoint>(Self::CURSOR_LOCATION);
 
         let accepts_first_responder: extern "C" fn(&Object, Sel) -> BOOL =
             Self::accepts_first_responder;
@@ -184,8 +186,14 @@ impl<A: 'static + Application> IcedView<A> {
 
             let value = this.get_mut_ivar::<*mut c_void>(Self::EVENT_HANDLER_IVAR);
             let event_handler = *value as *mut EventHandler<A>;
-            (*event_handler).redraw();
+            (*event_handler).redraw(Self::cursor_position(this));
         }
+    }
+
+    unsafe fn cursor_position(this: *mut Object) -> Point {
+        let mouse_location = (&mut (*this)).get_mut_ivar::<NSPoint>(Self::CURSOR_LOCATION);
+        let converted_location = NSView::convertPoint_fromView_(this, *mouse_location, nil);
+        Point::new(converted_location.x as f32, converted_location.y as f32)
     }
 
     extern "C" fn resize(this: &mut Object, _cmd: Sel) {
@@ -273,6 +281,8 @@ impl<A: 'static + Application> IcedView<A> {
                 }
                 .into(),
             );
+
+            this.set_ivar::<NSPoint>(Self::CURSOR_LOCATION, event.locationInWindow());
             let () = msg_send![this, setNeedsDisplay: YES];
         };
     }
@@ -413,8 +423,13 @@ impl<A: 'static + Application> EventHandler<A> {
         let mut debug = Debug::new();
         let mut renderer = Renderer::new(Backend::new(&mut device, settings.into()));
         let program = Program::new(application);
-        let state: program::State<Program<A>> =
-            program::State::new(program, viewport.logical_size(), &mut renderer, &mut debug);
+        let state: program::State<Program<A>> = program::State::new(
+            program,
+            viewport.logical_size(),
+            Point::default(),
+            &mut renderer,
+            &mut debug,
+        );
 
         Self {
             state,
@@ -517,8 +532,8 @@ impl<A: 'static + Application> EventHandler<A> {
         events.into_iter().for_each(|e| self.state.queue_event(e));
     }
 
-    fn redraw(&mut self) {
-        self.update_state();
+    fn redraw(&mut self, cursor_position: Point) {
+        self.update_state(cursor_position);
 
         if let Ok(frame) = self.swap_chain.get_next_texture() {
             self.debug.render_started();
@@ -539,11 +554,12 @@ impl<A: 'static + Application> EventHandler<A> {
         }
     }
 
-    fn update_state(&mut self) {
+    fn update_state(&mut self, cursor_position: Point) {
         if !self.state.is_queue_empty() {
             self.state.update(
-                Some(&self.pasteboard),
                 self.viewport.logical_size(),
+                cursor_position,
+                Some(&self.pasteboard),
                 &mut self.renderer,
                 &mut self.debug,
             );
