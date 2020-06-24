@@ -380,7 +380,6 @@ impl<'a> Step {
         Self::container("Welcome!")
             .push(Text::new(
                 "This is a simple tour meant to showcase a bunch of widgets \
-                и вот этот текст с юникодом, должен тоже работать, если проблема не шрифт \
                  that can be easily implemented on top of Iced.",
             ))
             .push(Text::new(
